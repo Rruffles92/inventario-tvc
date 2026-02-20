@@ -11,7 +11,7 @@ st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon
 DB_FILE = "inventario_tvc.csv"
 HISTORIAL_FILE = "historial_reportes.txt"
 
-# --- FUNCIONES DE PERSISTENCIA (GUARDADO FÍSICO) ---
+# --- FUNCIONES DE PERSISTENCIA ---
 def cargar_datos():
     if os.path.exists(DB_FILE):
         return pd.read_csv(DB_FILE)
@@ -31,7 +31,6 @@ def guardar_historial(lista):
         for item in lista:
             f.write(f"{item}\n")
 
-# Inicializar estados de sesión
 if "inventario_data" not in st.session_state:
     st.session_state.inventario_data = cargar_datos()
 if "historial" not in st.session_state:
@@ -67,13 +66,6 @@ with st.sidebar:
     st.markdown("<h3 style='text-align: center;'>Asistente Virtual</h3>", unsafe_allow_html=True)
     st.markdown("---")
     opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
-    st.markdown("---")
-    st.markdown("### 🛠️ *Consultas IA*")
-    pregunta = st.text_input("Pregúntame sobre el stock:")
-    if pregunta and not st.session_state.inventario_data.empty:
-        df_ia = st.session_state.inventario_data
-        res = df_ia[df_ia.apply(lambda r: pregunta.lower() in str(r).lower(), axis=1)]
-        if not res.empty: st.dataframe(res[['clave', 'nombre', 'cajas']], hide_index=True)
 
 # --- SECCIÓN: STOCK ACTUAL ---
 if opcion == "📊 Stock Actual":
@@ -86,7 +78,7 @@ if opcion == "📊 Stock Actual":
         if st.button("💾 Guardar cambios permanentes"):
             st.session_state.inventario_data = editado
             guardar_datos(editado)
-            st.success("✅ ¡Datos guardados en el archivo CSV!")
+            st.success("✅ ¡Datos guardados!")
 
 # --- SECCIÓN: REGISTRAR ENTRADA ---
 elif opcion == "📥 Registrar Entrada":
@@ -104,7 +96,75 @@ elif opcion == "📥 Registrar Entrada":
         with c3: c_sueltas = st.number_input("Piezas Sueltas", min_value=0, value=0)
         
         if st.form_submit_button("🚀 Guardar"):
-            if sku and nom: # Corrección Línea 131
+            if sku and nom: # CORRECCIÓN LÍNEA 131
                 df = st.session_state.inventario_data
                 if sku.lower() in df['clave'].astype(str).str.lower().values:
-                    idx = df[df
+                    idx = df[df['clave'].astype(str).str.lower() == sku.lower()].index[0]
+                    df.at[idx, 'cajas'] += c_cajas
+                else:
+                    nueva = pd.DataFrame([[sku, nom, c_cajas, c_cap, c_sueltas, ubi]], columns=df.columns)
+                    df = pd.concat([df, nueva], ignore_index=True)
+                st.session_state.inventario_data = df
+                guardar_datos(df)
+                st.success("✅ Registrado.")
+                st.rerun()
+
+# --- SECCIÓN: RETIRAR PRODUCTO ---
+elif opcion == "📤 Retirar Producto":
+    st.header("📤 Salida de Almacén")
+    with st.form("form_out", clear_on_submit=True):
+        sku_ret = st.text_input("Clave a retirar").strip()
+        r_caj = st.number_input("Cajas", min_value=0)
+        if st.form_submit_button("✅ Confirmar"):
+            df = st.session_state.inventario_data
+            mask = df['clave'].astype(str).str.lower() == sku_ret.lower()
+            if mask.any():
+                idx = df[mask].index[0] # CORRECCIÓN LÍNEA 110
+                df.at[idx, 'cajas'] = max(0, int(df.at[idx, 'cajas']) - r_caj)
+                st.session_state.inventario_data = df
+                guardar_datos(df)
+                st.success("✅ Retiro confirmado.")
+                st.rerun()
+
+# --- SECCIÓN: REPORTES EXCEL (CON SELECCIÓN Y BORRADO) ---
+elif opcion == "💾 Reportes Excel":
+    st.header("💾 Exportar y Gestionar Reportes")
+
+    # 1. ELIMINAR REPORTES (PARTE SUPERIOR)
+    if st.session_state.historial:
+        st.subheader("🗑️ Seleccionar y Eliminar del Historial")
+        seleccionados = st.multiselect("Marca los reportes que quieres borrar de la lista:", st.session_state.historial)
+        
+        if st.button("❌ Eliminar seleccionados"):
+            st.session_state.historial = [h for h in st.session_state.historial if h not in seleccionados]
+            guardar_historial(st.session_state.historial)
+            st.success("Historial actualizado correctamente.")
+            st.rerun()
+    else:
+        st.info("No hay reportes en la lista para gestionar.")
+
+    st.divider()
+
+    # 2. GENERAR REPORTE NUEVO
+    if not st.session_state.inventario_data.empty:
+        df_ex = st.session_state.inventario_data.copy()
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_ex.to_excel(writer, index=False)
+        
+        fecha = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
+        nombre_archivo = f"Stock_TVC_{fecha}.xlsx"
+        
+        # CORRECCIÓN LÍNEA 132
+        st.download_button(
+            label="📥 Descargar Reporte Actual",
+            data=output.getvalue(),
+            file_name=nombre_archivo
+        )
+        
+        if st.button("✨ Guardar este nombre en la lista permanente"):
+            if nombre_archivo not in st.session_state.historial:
+                st.session_state.historial.append(nombre_archivo)
+                guardar_historial(st.session_state.historial)
+                st.success(f"Se agregó {nombre_archivo} a la lista.")
+                st.rerun()
