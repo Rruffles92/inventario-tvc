@@ -66,7 +66,7 @@ if verificar_password():
         st.session_state["autenticado"] = False
         st.rerun()
 
-    # --- PUNTO DE VENTA ---
+    # --- PUNTO DE VENTA CON BORRADO INDIVIDUAL ---
     if opcion == "🛒 Punto de Venta":
         st.header("🛒 Punto de Venta")
         col1, col2 = st.columns([1, 1.8])
@@ -80,69 +80,78 @@ if verificar_password():
                     st.info(f"*{p['Nombre']}*\n\nDisponible: {p['Cantidad']}")
                     cant_pedida = st.number_input("Cantidad:", min_value=1, max_value=int(p['Cantidad']), value=1)
                     if st.button("➕ Agregar"):
-                        for _ in range(int(cant_pedida)):
-                            st.session_state.carrito.append({'Clave': p['Clave'], 'Nombre': p['Nombre'], 'Precio': p['Precio']})
+                        # Se guarda como lista de diccionarios para facilitar manejo
+                        st.session_state.carrito.append({'Clave': p['Clave'], 'Nombre': p['Nombre'], 'Precio': p['Precio'], 'Cant': int(cant_pedida)})
                         st.rerun()
                 else: st.error("No encontrado")
 
         with col2:
             st.subheader("🛒 Carrito (Producto, Cantidad, Precio)")
             if st.session_state.carrito:
-                res = pd.DataFrame(st.session_state.carrito).groupby(['Clave', 'Nombre', 'Precio']).size().reset_index(name='Cantidad')
-                res['Subtotal'] = res['Cantidad'] * res['Precio']
+                # Procesar carrito para mostrar en tabla
+                res = pd.DataFrame(st.session_state.carrito)
+                # Agrupar por si se agregó el mismo producto varias veces
+                res = res.groupby(['Clave', 'Nombre', 'Precio'])['Cant'].sum().reset_index()
+                res['Subtotal'] = res['Cant'] * res['Precio']
                 
-                tabla_visual = res[['Nombre', 'Cantidad', 'Precio']].rename(columns={'Nombre': 'Producto'})
+                tabla_visual = res[['Nombre', 'Cant', 'Precio']].rename(columns={'Nombre': 'Producto', 'Cant': 'Cantidad'})
                 tabla_visual['Precio'] = tabla_visual['Precio'].map('${:,.2f} MXN'.format)
                 st.table(tabla_visual)
                 
                 total = res['Subtotal'].sum()
                 st.markdown(f"### TOTAL: :green[${total:,.2f} MXN]")
                 
-                if st.button("🚀 Realizar Factura"):
+                # --- NUEVA OPCIÓN: BORRAR PRODUCTO ESPECÍFICO ---
+                with st.expander("🗑️ Editar Carrito (Quitar productos)"):
+                    prod_eliminar = st.selectbox("Selecciona el producto a quitar:", res['Nombre'])
+                    if st.button("❌ Eliminar del Carrito"):
+                        # Filtrar la lista del carrito para quitar el seleccionado
+                        st.session_state.carrito = [item for item in st.session_state.carrito if item['Nombre'] != prod_eliminar]
+                        st.warning(f"Se quitó {prod_eliminar} del carrito.")
+                        st.rerun()
+
+                c1, c2 = st.columns(2)
+                if c1.button("🧹 Vaciar Todo"):
+                    st.session_state.carrito = []
+                    st.rerun()
+                
+                if c2.button("🚀 Realizar Factura e Imprimir"):
                     fol = generar_folio_corto()
                     txt_imprimir = ""
                     for _, r in res.iterrows():
-                        df.loc[df['Clave'] == r['Clave'], 'Cantidad'] -= r['Cantidad']
-                        txt_imprimir += f"{r['Cantidad']}x {r['Nombre']} - ${r['Subtotal']:,.2f}<br>"
+                        df.loc[df['Clave'] == r['Clave'], 'Cantidad'] -= r['Cant']
+                        txt_imprimir += f"{r['Cant']}x {r['Nombre']} - ${r['Subtotal']:,.2f}<br>"
                     
                     guardar_inventario(df)
                     registrar_venta_historial(fol, txt_imprimir.replace("<br>", " | "), total)
                     
                     ticket_html = f"""
-                    <div style="font-family: monospace; width: 280px; padding: 15px; border: 1px dashed #000; background: #fff;">
+                    <div style="font-family: monospace; width: 280px; padding: 15px; border: 1px dashed #000; background: #fff; color: #000;">
                         <h2 style="text-align: center;">TVC SAN NICOLÁS</h2>
                         <hr><p><strong>FOLIO:</strong> {fol}</p>
                         <p><strong>FECHA:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p><hr>
                         <div style="font-size: 13px;">{txt_imprimir}</div><hr>
                         <h3 style="text-align: right;">TOTAL: ${total:,.2f} MXN</h3>
                     </div>
-                    <br><button onclick="window.print();" style="width: 100%; padding: 10px; background: #2ecc71; color: white; border: none; cursor: pointer;">🖨️ IMPRIMIR TICKET</button>
+                    <br><button onclick="window.print();" style="width: 100%; padding: 10px; background: #2ecc71; color: white; border: none; cursor: pointer; font-weight: bold;">🖨️ IMPRIMIR TICKET</button>
                     """
                     components.html(ticket_html, height=450)
                     st.session_state.carrito = []
             else: st.info("Carrito vacío")
 
-    # --- HISTORIAL CON OPCIÓN DE BORRAR ---
+    # --- HISTORIAL ---
     elif opcion == "📜 Historial":
         st.header("📜 Historial de Facturación")
         hist = cargar_historial()
-        
         if not hist.empty:
-            # Mostrar tabla
             st.dataframe(hist.sort_values(by='Fecha', ascending=False), use_container_width=True)
-            
             st.markdown("---")
-            st.subheader("🗑️ Eliminar Registro de Factura")
-            folio_a_borrar = st.selectbox("Selecciona el Folio de la factura que deseas eliminar:", hist['Folio'].astype(str))
-            
-            if st.button("⚠️ Borrar Factura Permanentemente"):
-                # Filtrar el historial eliminando el folio seleccionado
+            folio_a_borrar = st.selectbox("Selecciona Folio para eliminar del historial:", hist['Folio'].astype(str))
+            if st.button("⚠️ Borrar del Historial"):
                 nuevo_historial = hist[hist['Folio'].astype(str) != folio_a_borrar]
                 guardar_en_historial(nuevo_historial)
-                st.error(f"Factura con Folio {folio_a_borrar} eliminada correctamente.")
                 st.rerun()
-        else:
-            st.warning("No hay registros de ventas todavía.")
+        else: st.warning("No hay registros.")
 
     # --- OTROS MENÚS ---
     elif opcion == "📊 Stock y Edición":
