@@ -10,9 +10,7 @@ from streamlit_lottie import st_lottie
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
 DB_FILE = "inventario_tvc.csv"
 HISTORIAL_FILE = "historial_reportes.txt"
-LOG_MOVIMIENTOS = "movimientos_tvc.csv"
 
-# --- FUNCIONES DE PERSISTENCIA ---
 def cargar_datos():
     if os.path.exists(DB_FILE):
         return pd.read_csv(DB_FILE)
@@ -36,17 +34,6 @@ if "inventario_data" not in st.session_state:
     st.session_state.inventario_data = cargar_datos()
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# --- ASISTENTE VIRTUAL ---
-def load_lottieurl(url: str):
-    try:
-        r = requests.get(url, timeout=5)
-        return r.json() if r.status_code == 200 else None
-    except: return None
-
-lottie_robot = load_lottieurl("https://lottie.host/8026131b-789d-4899-b903-f09d84656041/7zH665M5K1.json")
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state:
@@ -64,116 +51,124 @@ if not st.session_state["autenticado"]:
 
 # --- BARRA LATERAL ---
 with st.sidebar:
-    if lottie_robot:
-        st_lottie(lottie_robot, height=150, key="robot")
-    st.markdown("<h3 style='text-align: center;'>TVC System</h3>", unsafe_allow_html=True)
+    st.title("TVC System")
+    opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
+    
     st.markdown("---")
-    opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel", "💬 Chat con IA"])
-
-# --- SECCIÓN: REPORTES EXCEL (CON TABLA DE GESTIÓN) ---
-if opcion == "💾 Reportes Excel":
-    st.header("💾 Gestión de Reportes")
-    
-    # Botón para crear reporte
-    ahora = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
-    nombre_nuevo = f"Reporte_TVC_{ahora}.xlsx"
-    
-    if st.button(f"➕ Generar y Guardar Nuevo Reporte"):
-        if nombre_nuevo not in st.session_state.historial:
-            st.session_state.historial.append(nombre_nuevo)
-            guardar_historial(st.session_state.historial)
-            st.success(f"Reporte '{nombre_nuevo}' creado con éxito.")
-            st.rerun()
-
-    st.divider()
-    st.subheader("📂 Reportes en Historial")
-    
-    # Lista de reportes para descargar y borrar individualmente
-    if st.session_state.historial:
-        # Preparar archivo para descarga
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            st.session_state.inventario_data.to_excel(writer, index=False)
-        excel_bin = output.getvalue()
-
-        for i, nombre in enumerate(st.session_state.historial):
-            col_nom, col_down, col_del = st.columns([3, 1, 1])
-            with col_nom:
-                st.write(f"📄 {nombre}")
-            with col_down:
-                st.download_button("📥 Bajar", data=excel_bin, file_name=nombre, key=f"d_{i}")
-            with col_del:
-                if st.button("🗑️ Borrar", key=f"b_{i}"):
-                    st.session_state.historial.pop(i)
-                    guardar_historial(st.session_state.historial)
-                    st.rerun()
-    else:
-        st.info("No hay reportes guardados. Haz clic en el botón de arriba para crear uno.")
-
-# --- SECCIÓN: CHAT CON IA (CUADRO NEGRO) ---
-elif opcion == "💬 Chat con IA":
-    st.header("💬 Asistente de Inventario")
-    
-    # Estilo de cuadro negro para el chat
-    st.markdown("""
-        <style>
-        .chat-container {
-            border: 2px solid black;
-            padding: 20px;
-            border-radius: 10px;
-            background-color: #f9f9f9;
-            min-height: 400px;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-    
+    # CHAT PEQUEÑO (Bordes negros) al final
+    st.subheader("💬 Consultas IA")
     with st.container():
-        st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-        
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-        
-        if prompt := st.chat_input("Pregúntame sobre el stock o movimientos..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            with st.chat_message("assistant"):
-                # Respuesta lógica según el inventario
-                if "stock" in prompt.lower() or "cuantos" in prompt.lower():
-                    total_items = len(st.session_state.inventario_data)
-                    response = f"Actualmente tenemos {total_items} productos distintos en el inventario."
-                else:
-                    response = "Hola, soy tu asistente TVC. Puedo ayudarte a saber qué productos se mueven más o cuántas piezas quedan de algún SKU."
-                
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-        
+        st.markdown('<div style="border: 2px solid black; padding: 10px; border-radius: 5px; background-color: #f0f2f6;">', unsafe_allow_html=True)
+        user_msg = st.text_input("Pregúntame algo:", key="chat_input", label_visibility="collapsed", placeholder="Escribe aquí...")
+        if user_msg:
+            if "stock" in user_msg.lower():
+                st.write(f"🤖 Hay {len(st.session_state.inventario_data)} productos en stock.")
+            else:
+                st.write("🤖 Estoy listo para ayudarte con el inventario.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- LAS OTRAS SECCIONES SE MANTIENEN IGUAL (STOCK, REGISTRO, RETIRO) ---
-elif opcion == "📊 Stock Actual":
-    st.header("📋 Inventario Editable")
+# --- SECCIÓN: STOCK ACTUAL ---
+if opcion == "📊 Stock Actual":
+    st.header("📋 Inventario Actual")
     df = st.session_state.inventario_data
+    if not df.empty and any(df['cajas'].astype(int) < 2):
+        st.warning("⚠️ Atención: Pocas cajas en stock.")
+    
     editado = st.data_editor(df, use_container_width=True, num_rows="dynamic")
     if st.button("💾 Guardar Cambios"):
         st.session_state.inventario_data = editado
         guardar_datos(editado)
         st.success("✅ Datos actualizados.")
 
+# --- SECCIÓN: REGISTRAR (Con todas tus opciones) ---
 elif opcion == "📥 Registrar Entrada":
-    st.header("📥 Registrar")
-    with st.form("reg"):
-        c1, c2 = st.columns(2)
-        sku = c1.text_input("Clave")
-        nom = c2.text_input("Nombre")
-        cajas = st.number_input("Cajas", min_value=0)
-        if st.form_submit_button("Guardar"):
-            # Lógica de registro aquí...
-            st.success("Registrado.")
+    st.header("📥 Registrar Producto")
+    with st.form("form_registro", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        sku = col1.text_input("Clave (Scan)").strip()
+        nom = col2.text_input("Nombre")
+        
+        c1, c2, c3 = st.columns(3)
+        caj = c1.number_input("Cajas", min_value=0, value=1)
+        pxc = c2.number_input("Piezas por Caja", min_value=1, value=10)
+        slt = c3.number_input("Piezas Sueltas", min_value=0, value=0)
+        
+        ubi = st.text_input("Ubicación")
+        
+        if st.form_submit_button("✅ Guardar"):
+            df = st.session_state.inventario_data
+            mask = df['clave'].astype(str) == sku
+            if mask.any():
+                idx = df[mask].index[0]
+                df.at[idx, 'cajas'] += caj
+                df.at[idx, 'piezas_sueltas'] += slt
+            else:
+                nueva = pd.DataFrame([[sku, nom, caj, pxc, slt, ubi]], columns=df.columns)
+                df = pd.concat([df, nueva], ignore_index=True)
+            
+            guardar_datos(df)
+            st.session_state.inventario_data = df
+            st.rerun()
 
+# --- SECCIÓN: RETIRAR (Clave, Cajas y Sueltas) ---
 elif opcion == "📤 Retirar Producto":
-    st.header("📤 Retirar")
-    # Lógica de retiro con escáner aquí...
-    st.write("Usa el escáner para retirar.")
+    st.header("📤 Retiro de Mercancía")
+    df = st.session_state.inventario_data
+    sku_ret = st.text_input("Escanea Clave para retirar:").strip()
+    
+    if sku_ret:
+        mask = df['clave'].astype(str) == sku_ret
+        if mask.any():
+            idx = df[mask].index[0]
+            prod = df.loc[idx]
+            st.info(f"Producto: {prod['nombre']} | Stock: {prod['cajas']} cajas y {prod['piezas_sueltas']} sueltas.")
+            
+            with st.form("form_retiro"):
+                r_caj = st.number_input("Cajas a retirar", min_value=0, max_value=int(prod['cajas']))
+                r_slt = st.number_input("Piezas sueltas a retirar", min_value=0, max_value=int(prod['piezas_sueltas']))
+                
+                if st.form_submit_button("Confirmar Retiro"):
+                    df.at[idx, 'cajas'] -= r_caj
+                    df.at[idx, 'piezas_sueltas'] -= r_slt
+                    
+                    # Auto-eliminar si llega a 0
+                    if df.at[idx, 'cajas'] <= 0 and df.at[idx, 'piezas_sueltas'] <= 0:
+                        df = df.drop(idx)
+                        st.warning("Producto agotado y eliminado del stock.")
+                    
+                    guardar_datos(df)
+                    st.session_state.inventario_data = df
+                    st.rerun()
+        else:
+            st.error("Clave no encontrada.")
+
+# --- SECCIÓN: REPORTES (Con borrado individual) ---
+elif opcion == "💾 Reportes Excel":
+    st.header("💾 Gestión de Reportes")
+    ahora = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
+    nombre_r = f"Reporte_{ahora}.xlsx"
+    
+    if st.button("➕ Crear y Guardar Reporte en Historial"):
+        if nombre_r not in st.session_state.historial:
+            st.session_state.historial.append(nombre_r)
+            guardar_historial(st.session_state.historial)
+            st.rerun()
+
+    st.divider()
+    st.subheader("🗑️ Eliminar Reportes del Historial")
+    if st.session_state.historial:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            st.session_state.inventario_data.to_excel(writer, index=False)
+        excel_bin = output.getvalue()
+
+        for i, nombre in enumerate(st.session_state.historial):
+            c1, c2, c3 = st.columns([3, 1, 1])
+            c1.write(f"📄 {nombre}")
+            c2.download_button("📥 Bajar", data=excel_bin, file_name=nombre, key=f"d_{i}")
+            if c3.button("🗑️ Borrar", key=f"b_{i}"):
+                st.session_state.historial.pop(i)
+                guardar_historial(st.session_state.historial)
+                st.rerun()
+    else:
+        st.info("No hay reportes en la lista.")
