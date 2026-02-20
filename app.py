@@ -5,10 +5,11 @@ from streamlit_gsheets import GSheetsConnection
 from io import BytesIO
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="TVC Control Inventario", layout="wide")
+st.set_page_config(page_title="Control de Inventario TVC", layout="wide")
 
-# --- CONEXIÓN AL DRIVE ---
-URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbwU4KfHNgOLpQbg8gCUf8gzzYquI1u6zZ2Kxi_dActDmH819l1Wea1Y35hk8ARgUNmK/exec"
+# --- CONEXIÓN A GOOGLE DRIVE (APPS SCRIPT) ---
+# Asegúrate de reemplazar esto con tu último enlace de implementación
+URL_APPS_SCRIPT = "https://docs.google.com/spreadsheets/d/1a-N5oH8IJ3ouqOUv-2iHjjUMzuadHIFJJJVhnGD_Hgc/edit?gid=0#gid=0"
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state:
@@ -22,13 +23,14 @@ if not st.session_state["autenticado"]:
             st.session_state["autenticado"] = True
             st.rerun()
         else:
-            st.error("❌ Clave incorrecta")
+            st.error("❌ Contraseña Incorrecta")
     st.stop()
 
 # --- CARGA DE DATOS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos():
+    # ttl=0 asegura que siempre traigamos los datos más recientes
     data = conn.read(ttl=0)
     data.columns = [str(c).strip().lower() for c in data.columns]
     return data
@@ -37,65 +39,68 @@ df = cargar_datos()
 
 # --- MENÚ LATERAL ---
 st.sidebar.title("Menú TVC")
-opcion = st.sidebar.radio("Ir a:", ["📊 Stock Actual", "📥 Registrar/Editar", "📍 Ubicaciones", "💾 Descargar Excel"])
+opcion = st.sidebar.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar/Editar", "📍 Ubicaciones", "💾 Exportar Excel"])
 
-# --- SECCIÓN: REGISTRAR O MODIFICAR ---
+# --- SECCIÓN: REGISTRAR O EDITAR ---
 if opcion == "📥 Registrar/Editar":
     st.header("Registrar o Modificar Producto")
-    with st.form("form_tvc", clear_on_submit=True):
-        c = st.text_input("Clave del Producto").strip()
-        n = st.text_input("Nombre / Descripción")
-        ca = st.number_input("Cantidad a sumar", min_value=1, value=1)
-        u = st.text_input("Ubicación")
+    with st.form("tvc_form", clear_on_submit=True):
+        clave = st.text_input("SKU / Clave del Producto").strip()
+        nombre = st.text_input("Nombre / Descripción del Producto")
+        cantidad = st.number_input("Cantidad a sumar", min_value=1, value=1)
+        ubicacion = st.text_input("Ubicación de Almacenamiento")
         
         if st.form_submit_button("🚀 Guardar en Google Drive"):
-            if c and n:
-                if c.lower() in df['clave'].astype(str).str.lower().values:
-                    idx = df[df['clave'].astype(str).str.lower() == c.lower()].index[0]
-                    df.at[idx, 'cantidad'] = (df.at[idx, 'cantidad'] or 0) + ca
-                    df.at[idx, 'nombre'] = n
-                    if u: df.at[idx, 'ubicacion'] = u
+            if clave and nombre:
+                # Lógica: Actualizar si existe, de lo contrario agregar
+                if clave.lower() in df['clave'].astype(str).str.lower().values:
+                    idx = df[df['clave'].astype(str).str.lower() == clave.lower()].index[0]
+                    df.at[idx, 'cantidad'] = (df.at[idx, 'cantidad'] or 0) + cantidad
+                    df.at[idx, 'nombre'] = nombre
+                    if ubicacion: df.at[idx, 'ubicacion'] = ubicacion
                 else:
-                    nueva_fila = pd.DataFrame([[c, n, ca, u]], columns=df.columns)
+                    nueva_fila = pd.DataFrame([[clave, nombre, cantidad, ubicacion]], columns=df.columns)
                     df = pd.concat([df, nueva_fila], ignore_index=True)
                 
+                # Enviando datos a Apps Script
                 try:
                     js_data = df.to_json(orient='records')
                     res = requests.post(URL_APPS_SCRIPT, data=js_data)
                     if res.status_code == 200:
-                        st.success("✅ ¡Guardado en Drive!")
+                        st.success("✅ ¡Guardado exitosamente en Drive!")
                         st.balloons()
                     else:
-                        st.error("❌ El link de Google no respondió correctamente.")
-                except:
-                    st.error("❌ Error de red.")
+                        st.error("❌ Error: El enlace de Google no respondió correctamente.")
+                except Exception as e:
+                    st.error(f"❌ Error de conexión: {e}")
             else:
-                st.warning("⚠️ Completa Clave y Nombre.")
+                st.warning("⚠️ Por favor, completa tanto la Clave como el Nombre.")
 
 # --- SECCIÓN: UBICACIONES ---
 elif opcion == "📍 Ubicaciones":
     st.header("📍 Localizador de Stock")
-    bus = st.text_input("🔍 Buscar por clave:").lower()
-    res = df[df['clave'].astype(str).str.lower().str.contains(bus, na=False)] if bus else df
-    st.dataframe(res[['clave', 'nombre', 'ubicacion']], use_container_width=True)
+    busqueda = st.text_input("🔍 Buscar por SKU/Clave:").lower()
+    resultados = df[df['clave'].astype(str).str.lower().str.contains(busqueda, na=False)] if busqueda else df
+    st.dataframe(resultados[['clave', 'nombre', 'ubicacion']], use_container_width=True)
 
 # --- SECCIÓN: STOCK ACTUAL ---
 elif opcion == "📊 Stock Actual":
-    st.header("📋 Inventario Completo")
+    st.header("📋 Inventario de Stock Completo")
     st.dataframe(df, use_container_width=True)
 
-# --- SECCIÓN: DESCARGAR EXCEL (ARREGLADA) ---
-elif opcion == "💾 Descargar Excel":
-    st.header("💾 Exportar Inventario")
-    st.write("Genera un archivo Excel con todo el stock actual para tu respaldo.")
+# --- SECCIÓN: EXPORTAR EXCEL ---
+elif opcion == "💾 Exportar Excel":
+    st.header("💾 Descargar Respaldo")
+    st.write("Haz clic en el botón de abajo para descargar el stock actual como un archivo de Excel.")
     
+    # Generar Excel en memoria
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Stock')
+        df.to_excel(writer, index=False, sheet_name='Inventario')
     
     st.download_button(
         label="📥 Descargar Archivo Excel",
         data=output.getvalue(),
-        file_name="inventario_tvc.xlsx",
+        file_name="respaldo_inventario_tvc.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
