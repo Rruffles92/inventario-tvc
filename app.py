@@ -7,7 +7,7 @@ from datetime import datetime
 # --- CONFIGURACIÓN Y BLOQUEO DE ESTRUCTURA ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
 
-# Ocultar botones técnicos para que no muevan la estructura del programa
+# Ocultar botones técnicos para proteger el diseño
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -38,17 +38,17 @@ def guardar_historial(lista):
         for item in lista:
             f.write(f"{item}\n")
 
+# Inicializar estados
 if "inventario_data" not in st.session_state:
     st.session_state.inventario_data = cargar_datos()
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
-
-# --- ACCESO ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = ""
 
+# --- PANTALLA DE ACCESO ---
 if not st.session_state["autenticado"]:
     st.title("🔐 Acceso TVC San Nicolás")
     nombre_login = st.text_input("Tu Nombre:").strip().lower()
@@ -61,44 +61,47 @@ if not st.session_state["autenticado"]:
         else: st.error("❌ Datos incorrectos")
     st.stop()
 
-# --- INTERFAZ ---
+# --- INTERFAZ ACTIVA ---
 usuario = st.session_state["usuario_actual"]
 df_actual = st.session_state.inventario_data
 
-# ALERTA DE STOCK (3 CAJAS)
+# Alerta de stock bajo (3 cajas)
 bajos_auto = df_actual[df_actual['cajas'].astype(int) <= 3]
 if not bajos_auto.empty:
-    st.error(f"🚨 *ALERTA DE RELLENO:* {', '.join(bajos_auto['nombre'].tolist())}")
+    st.error(f"🚨 *¡RELLENAR PRONTO!* Quedan 3 cajas o menos de: {', '.join(bajos_auto['nombre'].tolist())}")
 
 with st.sidebar:
     st.title("TVC System")
-    st.write(f"👤 Usuario: *{usuario.capitalize()}*")
+    st.write(f"👤 Hola, *{usuario.capitalize()}*")
     
-    # Menús estáticos protegidos
+    # Menú fijo protegido
     opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- REGRESA EL ASISTENTE IA ---
-    st.markdown(f"""<div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: white;">
-        <p style="margin: 0; font-weight: bold; color: black;">🤖 Asistente IA ({usuario})</p></div>""", unsafe_allow_html=True)
+    # --- REGRESO DE LA IA ---
+    st.markdown(f"""
+        <div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: white;">
+            <p style="margin: 0; font-weight: bold; color: black; font-size: 14px;">🤖 Asistente IA ({usuario})</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia")
     if pregunta:
         p = pregunta.lower().strip()
-        # Búsqueda por clave o nombre (DHT5684, etc)
+        # Búsqueda inteligente por nombre o clave
         res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(p) | df_actual['nombre'].str.lower().str.contains(p)]
         
         if not res.empty:
             prod = res.iloc[0]
-            st.info(f"📦 Raúl, de *{prod['nombre']}* hay: {prod['cajas']} cajas y {prod['piezas_sueltas']} piezas.")
-            st.write(f"📍 Ubicación: {prod['ubicacion']}")
+            st.info(f"📦 {usuario.capitalize()}, de *{prod['nombre']}* hay: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas*.")
+            st.write(f"📍 Ubicado en: {prod['ubicacion']}")
         else:
             st.warning(f"🔍 No encontré nada para '{p}', {usuario}.")
 
 # --- SECCIONES ---
 if opcion == "📊 Stock Actual":
-    st.header("📋 Inventario Actual")
+    st.header("📋 Inventario Actual (Solo Lectura)")
     st.dataframe(df_actual, use_container_width=True)
 
 elif opcion == "📥 Registrar Entrada":
@@ -135,16 +138,16 @@ elif opcion == "📤 Retirar Producto":
             item = df_actual.loc[idx]
             st.info(f"📦 {item['nombre']} | {item['piezas_sueltas']} sueltas")
             with st.form("f_ret"):
-                cant = st.number_input("Cantidad a quitar", min_value=1, max_value=int(item['piezas_sueltas']))
-                if st.form_submit_button("Descontar"):
+                cant = st.number_input("Cantidad a retirar", min_value=1, max_value=int(item['piezas_sueltas']))
+                if st.form_submit_button("Confirmar Salida"):
                     df_actual.at[idx, 'piezas_sueltas'] -= cant
                     guardar_datos(df_actual)
                     st.session_state.inventario_data = df_actual
                     st.rerun()
 
 elif opcion == "💾 Reportes Excel":
-    st.header("💾 Gestión de Reportes")
-    if st.button("➕ Generar Nuevo Reporte"):
+    st.header("💾 Reportes y Archivos")
+    if st.button("➕ Crear Reporte"):
         n_rep = f"Reporte_{datetime.now().strftime('%d-%m-%Y_%Hh%M')}.xlsx"
         st.session_state.historial.append(n_rep)
         guardar_historial(st.session_state.historial)
