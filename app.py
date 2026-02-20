@@ -7,8 +7,9 @@ from io import BytesIO
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide")
 
-# --- CONEXIÓN AL DRIVE ---
-URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbzpQPwrLR0Zey9hW8b85RsbWvHQlX6DuNu_UVowm-U2IiAIxFXIj61E2zX_GUqnG8yk/exec"
+# --- CONEXIÓN AL DRIVE (NUEVO ENLACE) ---
+# He actualizado este link con el que me acabas de mandar
+URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbwU4KfHNgOLpQbg8gCUf8gzzYquI1u6zZ2Kxi_dActDmH819l1Wea1Y35hk8ARgUNmK/exec"
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state:
@@ -29,7 +30,7 @@ if not st.session_state["autenticado"]:
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos():
-    # Leemos la hoja sin caché para ver lo más nuevo
+    # ttl=0 para asegurar que siempre lea los datos reales del Drive
     data = conn.read(ttl=0)
     data.columns = [str(c).strip().lower() for c in data.columns]
     return data
@@ -51,7 +52,7 @@ if opcion == "📥 Registrar/Editar":
         
         if st.form_submit_button("🚀 Guardar en Google Drive"):
             if c and n:
-                # Si existe, sumamos; si no, creamos
+                # Si la clave ya existe, actualizamos; si no, agregamos fila
                 if c.lower() in df['clave'].astype(str).str.lower().values:
                     idx = df[df['clave'].astype(str).str.lower() == c.lower()].index[0]
                     df.at[idx, 'cantidad'] = (df.at[idx, 'cantidad'] or 0) + ca
@@ -61,44 +62,44 @@ if opcion == "📥 Registrar/Editar":
                     nueva_fila = pd.DataFrame([[c, n, ca, u]], columns=df.columns)
                     df = pd.concat([df, nueva_fila], ignore_index=True)
                 
+                # Envío al nuevo script de Google
                 try:
                     js_data = df.to_json(orient='records')
                     res = requests.post(URL_APPS_SCRIPT, data=js_data)
                     if res.status_code == 200:
-                        st.success("✅ ¡Sincronizado con Drive!")
+                        st.success("✅ ¡Datos guardados en la nueva hoja!")
                         st.balloons()
                     else:
-                        st.error("❌ Error de conexión con Drive.")
+                        st.error("❌ Error: El link de Google no respondió correctamente.")
                 except:
-                    st.error("❌ Error de red.")
+                    st.error("❌ Error de red al intentar conectar con Drive.")
             else:
                 st.warning("⚠️ Completa Clave y Nombre.")
 
 # --- SECCIÓN: UBICACIONES ---
 elif opcion == "📍 Ubicaciones":
     st.header("📍 Localizador de Stock")
-    bus = st.text_input("🔍 Escribe la clave para buscar:").lower()
+    bus = st.text_input("🔍 Buscar por clave:").lower()
     res = df[df['clave'].astype(str).str.lower().str.contains(bus, na=False)] if bus else df
     st.dataframe(res[['clave', 'nombre', 'ubicacion']], use_container_width=True)
 
 # --- SECCIÓN: STOCK ACTUAL ---
 elif opcion == "📊 Stock Actual":
-    st.header("📋 Inventario Completo")
+    st.header("📋 Inventario Sincronizado")
     st.dataframe(df, use_container_width=True)
 
-# --- NUEVA SECCIÓN: DESCARGAR EXCEL ---
+# --- SECCIÓN: DESCARGAR EXCEL ---
 elif opcion == "💾 Descargar Excel":
     st.header("💾 Exportar Inventario")
-    st.write("Haz clic en el botón de abajo para descargar una copia en Excel de todo el stock.")
+    st.write("Descarga una copia completa de tu stock en formato Excel.")
     
-    # Creamos el archivo en memoria
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Stock')
+        df.to_excel(writer, index=False, sheet_name='Inventario')
     
     st.download_button(
         label="📥 Descargar Archivo Excel",
         data=output.getvalue(),
-        file_name="inventario_tvc_actual.xlsx",
+        file_name="inventario_tvc.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
