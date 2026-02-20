@@ -2,51 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 from streamlit_gsheets import GSheetsConnection
+from io import BytesIO
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="TVC Movil", layout="wide")
+st.set_page_config(page_title="TVC Control Inventario", layout="wide")
 
-# --- ESTILO PARA LETRAS GRANDES (CELULAR) ---
-st.markdown("""
-    <style>
-    /* Agranda el texto de toda la página */
-    html, body, [class*="css"] {
-        font-size: 22px !important;
-    }
-    /* Agranda los títulos */
-    h1 {
-        font-size: 40px !important;
-        color: #1E88E5 !important;
-    }
-    /* Agranda las etiquetas de los cuadros de texto (Clave, Nombre, etc.) */
-    .stTextInput label, .stNumberInput label {
-        font-size: 26px !important;
-        font-weight: bold !important;
-        color: #333 !important;
-    }
-    /* Agranda los cuadros donde escribes */
-    input {
-        font-size: 24px !important;
-        height: 50px !important;
-    }
-    /* Agranda MUCHO el botón de Guardar */
-    .stButton>button {
-        font-size: 30px !important;
-        font-weight: bold !important;
-        height: 80px !important;
-        width: 100% !important;
-        background-color: #2e7d32 !important;
-        color: white !important;
-        border-radius: 15px !important;
-    }
-    /* Agranda las letras de la tabla de inventario */
-    .stDataFrame {
-        font-size: 20px !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- TU ENLACE DE DRIVE ---
+# --- CONEXIÓN AL DRIVE ---
 URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbzpQPwrLR0Zey9hW8b85RsbWvHQlX6DuNu_UVowm-U2IiAIxFXIj61E2zX_GUqnG8yk/exec"
 
 # --- SEGURIDAD ---
@@ -54,9 +15,9 @@ if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
 if not st.session_state["autenticado"]:
-    st.markdown("<h1>🔐 Acceso TVC</h1>", unsafe_allow_html=True)
+    st.title("🔐 Acceso TVC San Nicolás")
     password = st.text_input("Contraseña:", type="password")
-    if st.button("ENTRAR"):
+    if st.button("Entrar"):
         if password == "TVCsanicolas":
             st.session_state["autenticado"] = True
             st.rerun()
@@ -66,27 +27,31 @@ if not st.session_state["autenticado"]:
 
 # --- CARGA DE DATOS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
+
 def cargar_datos():
+    # Leemos la hoja sin caché para ver lo más nuevo
     data = conn.read(ttl=0)
     data.columns = [str(c).strip().lower() for c in data.columns]
     return data
 
 df = cargar_datos()
 
-# --- MENÚ ---
-st.sidebar.title("MENU")
-opcion = st.sidebar.radio("Ir a:", ["📊 Stock", "📥 Registrar/Editar", "📍 Ubicaciones"])
+# --- MENÚ LATERAL ---
+st.sidebar.title("Menú TVC")
+opcion = st.sidebar.radio("Ir a:", ["📊 Stock Actual", "📥 Registrar/Editar", "📍 Ubicaciones", "💾 Descargar Excel"])
 
+# --- SECCIÓN: REGISTRAR O MODIFICAR ---
 if opcion == "📥 Registrar/Editar":
-    st.markdown("<h1>📥 Registro</h1>", unsafe_allow_html=True)
-    with st.form("form_tvc"):
-        c = st.text_input("Clave del Producto")
+    st.header("Registrar o Modificar Producto")
+    with st.form("form_tvc", clear_on_submit=True):
+        c = st.text_input("Clave del Producto").strip()
         n = st.text_input("Nombre / Descripción")
         ca = st.number_input("Cantidad a sumar", min_value=1, value=1)
         u = st.text_input("Ubicación")
         
-        if st.form_submit_button("🚀 GUARDAR EN DRIVE"):
+        if st.form_submit_button("🚀 Guardar en Google Drive"):
             if c and n:
+                # Si existe, sumamos; si no, creamos
                 if c.lower() in df['clave'].astype(str).str.lower().values:
                     idx = df[df['clave'].astype(str).str.lower() == c.lower()].index[0]
                     df.at[idx, 'cantidad'] = (df.at[idx, 'cantidad'] or 0) + ca
@@ -100,19 +65,40 @@ if opcion == "📥 Registrar/Editar":
                     js_data = df.to_json(orient='records')
                     res = requests.post(URL_APPS_SCRIPT, data=js_data)
                     if res.status_code == 200:
-                        st.success("✅ ¡GUARDADO!")
+                        st.success("✅ ¡Sincronizado con Drive!")
                         st.balloons()
                     else:
-                        st.error("❌ Error de conexión")
+                        st.error("❌ Error de conexión con Drive.")
                 except:
-                    st.error("❌ Error de red")
+                    st.error("❌ Error de red.")
+            else:
+                st.warning("⚠️ Completa Clave y Nombre.")
 
+# --- SECCIÓN: UBICACIONES ---
 elif opcion == "📍 Ubicaciones":
-    st.markdown("<h1>📍 Localizador</h1>", unsafe_allow_html=True)
-    bus = st.text_input("🔎 Buscar clave:").lower()
+    st.header("📍 Localizador de Stock")
+    bus = st.text_input("🔍 Escribe la clave para buscar:").lower()
     res = df[df['clave'].astype(str).str.lower().str.contains(bus, na=False)] if bus else df
     st.dataframe(res[['clave', 'nombre', 'ubicacion']], use_container_width=True)
 
-elif opcion == "📊 Stock":
-    st.markdown("<h1>📊 Stock Actual</h1>", unsafe_allow_html=True)
+# --- SECCIÓN: STOCK ACTUAL ---
+elif opcion == "📊 Stock Actual":
+    st.header("📋 Inventario Completo")
     st.dataframe(df, use_container_width=True)
+
+# --- NUEVA SECCIÓN: DESCARGAR EXCEL ---
+elif opcion == "💾 Descargar Excel":
+    st.header("💾 Exportar Inventario")
+    st.write("Haz clic en el botón de abajo para descargar una copia en Excel de todo el stock.")
+    
+    # Creamos el archivo en memoria
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Stock')
+    
+    st.download_button(
+        label="📥 Descargar Archivo Excel",
+        data=output.getvalue(),
+        file_name="inventario_tvc_actual.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
