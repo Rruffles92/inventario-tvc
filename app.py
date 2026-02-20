@@ -4,10 +4,10 @@ import os
 from io import BytesIO
 from datetime import datetime
 
-# --- CONFIGURACIÓN Y BLOQUEO DE ESTRUCTURA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
 
-# Ocultar botones técnicos para proteger el diseño
+# Ocultar botones técnicos para proteger la estructura
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -38,17 +38,17 @@ def guardar_historial(lista):
         for item in lista:
             f.write(f"{item}\n")
 
-# Inicializar estados
 if "inventario_data" not in st.session_state:
     st.session_state.inventario_data = cargar_datos()
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
+
+# --- ACCESO ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = ""
 
-# --- PANTALLA DE ACCESO ---
 if not st.session_state["autenticado"]:
     st.title("🔐 Acceso TVC San Nicolás")
     nombre_login = st.text_input("Tu Nombre:").strip().lower()
@@ -61,59 +61,62 @@ if not st.session_state["autenticado"]:
         else: st.error("❌ Datos incorrectos")
     st.stop()
 
-# --- INTERFAZ ACTIVA ---
 usuario = st.session_state["usuario_actual"]
 df_actual = st.session_state.inventario_data
 
-# Alerta de stock bajo (3 cajas)
+# Alerta automática (3 cajas)
 bajos_auto = df_actual[df_actual['cajas'].astype(int) <= 3]
 if not bajos_auto.empty:
-    st.error(f"🚨 *¡RELLENAR PRONTO!* Quedan 3 cajas o menos de: {', '.join(bajos_auto['nombre'].tolist())}")
+    st.error(f"🚨 *RELLENAR STOCK:* {', '.join(bajos_auto['nombre'].tolist())}")
 
 with st.sidebar:
     st.title("TVC System")
-    st.write(f"👤 Hola, *{usuario.capitalize()}*")
+    st.write(f"👤 Usuario: *{usuario.capitalize()}*")
     
-    # Menú fijo protegido
-    opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
+    # Menús visibles para todos
+    opcion = st.radio("Menú:", ["📊 Inventario y Guardado", "📥 Agregar Producto", "📤 Retirar Producto", "💾 Reportes"])
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- REGRESO DE LA IA ---
-    st.markdown(f"""
-        <div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: white;">
-            <p style="margin: 0; font-weight: bold; color: black; font-size: 14px;">🤖 Asistente IA ({usuario})</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # --- IA CORREGIDA ---
+    st.markdown(f"""<div style="border: 2px solid black; padding: 10px; border-radius: 5px; background-color: white;">
+        <p style="margin: 0; font-weight: bold; color: black;">🤖 Asistente IA ({usuario})</p></div>""", unsafe_allow_html=True)
     
     pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia")
     if pregunta:
-        p = pregunta.lower().strip()
-        # Búsqueda inteligente por nombre o clave
-        res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(p) | df_actual['nombre'].str.lower().str.contains(p)]
+        # Limpieza de la pregunta para extraer el producto
+        p_limpia = pregunta.lower().replace("cuanto hay de", "").replace("donde esta", "").replace("cantidad de", "").replace("ubicacion de", "").strip()
+        
+        res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(p_limpia) | 
+                        df_actual['nombre'].str.lower().str.contains(p_limpia)]
         
         if not res.empty:
             prod = res.iloc[0]
-            st.info(f"📦 {usuario.capitalize()}, de *{prod['nombre']}* hay: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas*.")
-            st.write(f"📍 Ubicado en: {prod['ubicacion']}")
+            st.info(f"📦 *{prod['nombre']}\n\n💰 Cantidad: *{prod['cajas']} cajas** y *{prod['piezas_sueltas']} piezas.\n\n📍 Ubicación: *{prod['ubicacion']}**")
         else:
-            st.warning(f"🔍 No encontré nada para '{p}', {usuario}.")
+            st.warning(f"🔍 No encontré nada relacionado con '{p_limpia}', {usuario}.")
 
 # --- SECCIONES ---
-if opcion == "📊 Stock Actual":
-    st.header("📋 Inventario Actual (Solo Lectura)")
-    st.dataframe(df_actual, use_container_width=True)
+if opcion == "📊 Inventario y Guardado":
+    st.header("📋 Inventario Editable")
+    # Tabla con opción de guardado
+    df_editado = st.data_editor(df_actual, use_container_width=True, num_rows="dynamic")
+    if st.button("💾 Guardar Todos los Cambios"):
+        guardar_datos(df_editado)
+        st.session_state.inventario_data = df_editado
+        st.success("¡Datos actualizados y guardados!")
+        st.rerun()
 
-elif opcion == "📥 Registrar Entrada":
-    st.header("📥 Registrar Entrada")
+elif opcion == "📥 Agregar Producto":
+    st.header("📥 Registro de Producto")
     with st.form("f_reg", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        sku = col1.text_input("Clave")
-        nom = col2.text_input("Nombre")
-        c1, c2, c3 = st.columns(3)
-        caj = c1.number_input("Cajas", min_value=0)
-        pxc = c2.number_input("Piezas x Caja", min_value=1)
-        slt = c3.number_input("Piezas Sueltas", min_value=0)
+        c1, c2 = st.columns(2)
+        sku = c1.text_input("Clave")
+        nom = c2.text_input("Nombre")
+        c3, c4, c5 = st.columns(3)
+        caj = c3.number_input("Cajas", min_value=0)
+        pxc = c4.number_input("Pzas x Caja", min_value=1)
+        slt = c5.number_input("Pzas Sueltas", min_value=0)
         ubi = st.text_input("Ubicación")
         if st.form_submit_button("✅ Guardar"):
             mask = df_actual['clave'].astype(str) == sku
@@ -129,43 +132,40 @@ elif opcion == "📥 Registrar Entrada":
             st.rerun()
 
 elif opcion == "📤 Retirar Producto":
-    st.header("📤 Retirar Producto")
-    sku_ret = st.text_input("Escribe la Clave:").strip()
+    st.header("📤 Salida de Producto")
+    sku_ret = st.text_input("Clave:").strip()
     if sku_ret:
         mask = df_actual['clave'].astype(str).str.lower() == sku_ret.lower()
         if mask.any():
             idx = df_actual[mask].index[0]
             item = df_actual.loc[idx]
-            st.info(f"📦 {item['nombre']} | {item['piezas_sueltas']} sueltas")
+            st.info(f"📦 {item['nombre']} | Hay {item['piezas_sueltas']} piezas")
             with st.form("f_ret"):
                 cant = st.number_input("Cantidad a retirar", min_value=1, max_value=int(item['piezas_sueltas']))
-                if st.form_submit_button("Confirmar Salida"):
+                if st.form_submit_button("Descontar"):
                     df_actual.at[idx, 'piezas_sueltas'] -= cant
                     guardar_datos(df_actual)
                     st.session_state.inventario_data = df_actual
                     st.rerun()
 
-elif opcion == "💾 Reportes Excel":
-    st.header("💾 Reportes y Archivos")
-    if st.button("➕ Crear Reporte"):
+elif opcion == "💾 Reportes":
+    st.header("💾 Reportes Excel")
+    if st.button("➕ Nuevo Reporte"):
         n_rep = f"Reporte_{datetime.now().strftime('%d-%m-%Y_%Hh%M')}.xlsx"
         st.session_state.historial.append(n_rep)
         guardar_historial(st.session_state.historial)
         st.rerun()
     
-    st.divider()
     if st.session_state.historial:
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_actual.to_excel(writer, index=False)
         excel_data = output.getvalue()
-
         for i, n in enumerate(st.session_state.historial):
-            c_nom, c_desc, c_borr = st.columns([3, 1, 1])
-            c_nom.write(f"📄 {n}")
-            c_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"d_{i}")
-            # Botón de borrar habilitado para todos
-            if c_borr.button("🗑️", key=f"b_{i}"):
+            c1, c2, c3 = st.columns([3, 1, 1])
+            c1.write(f"📄 {n}")
+            c2.download_button("📥", data=excel_data, file_name=n, key=f"d_{i}")
+            if c3.button("🗑️", key=f"b_{i}"):
                 st.session_state.historial.pop(i)
                 guardar_historial(st.session_state.historial)
                 st.rerun()
