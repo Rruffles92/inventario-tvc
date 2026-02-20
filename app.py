@@ -3,7 +3,6 @@ import pandas as pd
 import os
 from io import BytesIO
 from datetime import datetime
-import streamlit.components.v1 as components
 
 # --- 1. SEGURIDAD ---
 def verificar_password():
@@ -22,22 +21,23 @@ def verificar_password():
     return True
 
 if verificar_password():
-    st.set_page_config(page_title="TVC Sistema Pro", layout="wide")
+    st.set_page_config(page_title="TVC Control Stock", layout="wide")
     FILE_NAME = 'inventario_tvc_master.xlsx'
 
     # --- 2. FUNCIONES DE BASE DE DATOS ---
     def cargar_inventario():
-        if os.path.exists(FILE_NAME): return pd.read_excel(FILE_NAME)
-        return pd.DataFrame(columns=['Clave', 'Nombre', 'Cantidad', 'Ubicacion', 'Precio'])
+        if os.path.exists(FILE_NAME): 
+            return pd.read_excel(FILE_NAME)
+        # Se eliminó la columna 'Precio' de la estructura base
+        return pd.DataFrame(columns=['Clave', 'Nombre', 'Cantidad', 'Ubicacion'])
 
     def guardar_inventario(df):
         df.to_excel(FILE_NAME, index=False)
 
     df = cargar_inventario()
 
-    # --- 3. BARRA LATERAL (MENÚ SIMPLIFICADO) ---
+    # --- 3. BARRA LATERAL ---
     st.sidebar.title("📺 TVC Menú")
-    # Se eliminaron: Punto de Venta e Historial
     opcion = st.sidebar.radio("Ir a:", ["📊 Stock y Edición", "📍 Ubicaciones", "📥 Registrar Entrada", "💾 Descargar Stock"])
 
     if st.sidebar.button("🚪 Cerrar Sesión"):
@@ -46,27 +46,32 @@ if verificar_password():
 
     # --- 4. SECCIÓN: STOCK Y EDICIÓN ---
     if opcion == "📊 Stock y Edición":
-        st.header("📋 Inventario General")
-        st.dataframe(df.style.format({"Precio": "${:,.2f} MXN"}), use_container_width=True)
-        with st.expander("📝 Editar Información de Producto"):
-            sel = st.selectbox("Selecciona Producto:", df['Clave'] + " - " + df['Nombre'])
-            idx = df[df['Clave'] == sel.split(" - ")[0]].index[0]
-            
-            col_e1, col_e2 = st.columns(2)
-            n_nom = col_e1.text_input("Nombre", value=df.at[idx, 'Nombre'])
-            n_can = col_e2.number_input("Cantidad Actual", value=int(df.at[idx, 'Cantidad']))
-            n_pre = col_e1.number_input("Precio", value=float(df.at[idx, 'Precio']))
-            n_ubi = col_e2.text_input("Ubicación", value=df.at[idx, 'Ubicacion'])
-            
-            if st.button("💾 Guardar Cambios"):
-                df.at[idx, 'Nombre'], df.at[idx, 'Cantidad'] = n_nom, n_can
-                df.at[idx, 'Precio'], df.at[idx, 'Ubicacion'] = n_pre, n_ubi
-                guardar_inventario(df); st.success("¡Información actualizada!"); st.rerun()
+        st.header("📋 Inventario de Mercancía")
+        # Mostramos solo las columnas de interés
+        st.dataframe(df[['Clave', 'Nombre', 'Cantidad', 'Ubicacion']], use_container_width=True)
+        
+        if not df.empty:
+            with st.expander("📝 Editar Información de Producto"):
+                sel = st.selectbox("Selecciona Producto:", df['Clave'] + " - " + df['Nombre'])
+                idx = df[df['Clave'] == sel.split(" - ")[0]].index[0]
+                
+                col_e1, col_e2 = st.columns(2)
+                n_nom = col_e1.text_input("Nombre", value=df.at[idx, 'Nombre'])
+                n_can = col_e2.number_input("Cantidad Actual", value=int(df.at[idx, 'Cantidad']))
+                n_ubi = col_e1.text_input("Ubicación", value=df.at[idx, 'Ubicacion'])
+                
+                if st.button("💾 Guardar Cambios"):
+                    df.at[idx, 'Nombre'] = n_nom
+                    df.at[idx, 'Cantidad'] = n_can
+                    df.at[idx, 'Ubicacion'] = n_ubi
+                    guardar_inventario(df)
+                    st.success("¡Información actualizada!")
+                    st.rerun()
 
-    # --- 5. SECCIÓN: UBICACIONES (CON BUSCADOR) ---
+    # --- 5. SECCIÓN: UBICACIONES ---
     elif opcion == "📍 Ubicaciones":
         st.header("📍 Localización de Mercancía")
-        buscar_clave = st.text_input("🔍 Buscar ubicación por número de CLAVE:", placeholder="Escribe o escanea la clave...").upper()
+        buscar_clave = st.text_input("🔍 Buscar por número de CLAVE:", placeholder="Escribe o escanea...").upper()
         
         df_visual = df[['Clave', 'Nombre', 'Ubicacion']]
         if buscar_clave:
@@ -78,39 +83,38 @@ if verificar_password():
 
     # --- 6. SECCIÓN: REGISTRAR ENTRADA ---
     elif opcion == "📥 Registrar Entrada":
-        st.header("📥 Entrada de Nueva Mercancía")
+        st.header("📥 Entrada de Mercancía")
         with st.form("in"):
             col_in1, col_in2 = st.columns(2)
             c = col_in1.text_input("Clave").upper()
             n = col_in2.text_input("Nombre")
             ca = col_in1.number_input("Cantidad a sumar", min_value=1, value=1)
             u = col_in2.text_input("Ubicación")
-            p = col_in1.number_input("Precio Unitario MXN", min_value=0.0, step=0.1)
             
             if st.form_submit_button("Añadir al Inventario"):
                 if c in df['Clave'].values:
                     idx = df[df['Clave'] == c].index[0]
                     df.at[idx, 'Cantidad'] += ca
-                    df.at[idx, 'Precio'] = p
                     if u: df.at[idx, 'Ubicacion'] = u
                 else:
-                    nueva_fila = pd.DataFrame([[c, n, ca, u, p]], columns=df.columns)
+                    nueva_fila = pd.DataFrame([[c, n, ca, u]], columns=df.columns)
                     df = pd.concat([df, nueva_fila], ignore_index=True)
-                guardar_inventario(df); st.success("Inventario actualizado correctamente"); st.rerun()
+                guardar_inventario(df)
+                st.success("Inventario actualizado")
+                st.rerun()
 
     # --- 7. SECCIÓN: DESCARGAR STOCK ---
     elif opcion == "💾 Descargar Stock":
         st.header("💾 Exportar Inventario")
-        st.write("Presiona el botón para descargar un archivo Excel con todo el stock disponible actualmente.")
+        st.write("Genera un archivo Excel con el stock y ubicaciones actuales.")
         
-        # Generar el Excel en memoria
         out = BytesIO()
         with pd.ExcelWriter(out, engine='openpyxl') as w: 
             df.to_excel(w, index=False)
         
         st.download_button(
-            label="📥 Descargar Excel de Stock Completo",
+            label="📥 Descargar Excel de Stock",
             data=out.getvalue(),
-            file_name=f"stock_tvc_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            file_name=f"inventario_tvc_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
