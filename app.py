@@ -33,7 +33,7 @@ if "inventario_data" not in st.session_state:
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
 
-# --- SEGURIDAD Y LOGIN ---
+# --- SEGURIDAD Y LOGIN (Corregido para evitar errores rojos) ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
@@ -58,7 +58,7 @@ df_actual = st.session_state.inventario_data
 # ALERTA AUTOMÁTICA AL ENTRAR (3 cajas o menos)
 bajos_auto = df_actual[df_actual['cajas'].astype(int) <= 3]
 if not bajos_auto.empty:
-    st.error(f"🚨 *¡ATENCIÓN {usuario.upper()}!* Hay productos con stock muy bajo (3 cajas o menos): {', '.join(bajos_auto['nombre'].tolist())}")
+    st.error(f"🚨 *¡ATENCIÓN {usuario.upper()}!* Quedan 3 cajas o menos de: {', '.join(bajos_auto['nombre'].tolist())}")
 
 with st.sidebar:
     st.title("TVC System")
@@ -67,40 +67,47 @@ with st.sidebar:
     
     st.markdown("<br><br>", unsafe_allow_html=True)
     
-    # CHAT IA (Con funciones de conteo y alertas)
+    # CHAT IA (Con búsqueda de totales específicos)
     st.markdown(f"""
         <div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: #ffffff;">
             <p style="margin: 0; font-weight: bold; color: black; font-size: 14px;">🤖 Asistente IA ({usuario})</p>
         </div>
     """, unsafe_allow_html=True)
     
-    pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia", placeholder="Ej: ¿Qué hay que rellenar?")
+    pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia", placeholder="Ej: cuanto hay de DHT")
     
     if pregunta:
         p = pregunta.lower().strip()
         
-        # Conteo de cajas y producto
-        if any(x in p for x in ["cuantas cajas", "total de cajas", "cuanto producto"]):
-            total_caj = df_actual['cajas'].sum()
-            st.info(f"📊 {usuario}, tenemos un total de *{total_caj} cajas* en el inventario.")
-
-        # Alertas de relleno (3 cajas o menos)
-        elif any(x in p for x in ["rellenar", "acaba", "falta", "bajo"]):
-            if not bajos_auto.empty:
-                st.error(f"⚠️ {usuario}, estos productos tienen 3 cajas o menos: *{', '.join(bajos_auto['nombre'].tolist())}*")
+        # 1. BUSCAR TOTAL DE UN PRODUCTO ESPECÍFICO
+        if any(x in p for x in ["cuanto hay", "total de", "cantidad"]):
+            # Extraemos el nombre del producto de la pregunta
+            busqueda = p.replace("cuanto hay de", "").replace("cuanto hay", "").replace("total de", "").replace("cantidad de", "").strip()
+            res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
+            
+            if not res.empty:
+                prod = res.iloc[0]
+                st.info(f"📦 {usuario}, de *{prod['nombre']}* tenemos: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas* sueltas.")
             else:
-                st.success(f"✅ Todo bien, {usuario}. Ningún producto tiene menos de 3 cajas.")
+                st.warning(f"🔍 No encontré ningún producto que coincida con '{busqueda}'.")
 
-        # Localización
+        # 2. LOCALIZACIÓN
         elif any(x in p for x in ["donde", "ubica", "esta"]):
             busqueda = p.replace("donde esta", "").replace("donde", "").strip()
             res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
             if not res.empty:
-                st.info(f"📍 {usuario}, *{res.iloc[0]['nombre']}* está en: *{res.iloc[0]['ubicacion']}*")
+                st.info(f"📍 {usuario}, está en la ubicación: *{res.iloc[0]['ubicacion']}*")
             else:
-                st.warning(f"🔍 No encuentro '{busqueda}'.")
+                st.warning(f"🔍 No encuentro esa ubicación.")
 
-# --- SECCIONES (IGUALES A LAS ANTERIORES) ---
+        # 3. VER TODO LO QUE FALTA RELLENAR
+        elif any(x in p for x in ["rellenar", "acaba", "falta"]):
+            if not bajos_auto.empty:
+                st.error(f"⚠️ {usuario}, hay que reponer: *{', '.join(bajos_auto['nombre'].tolist())}*")
+            else:
+                st.success(f"✅ Todo bien en stock, {usuario}.")
+
+# --- SECCIONES (REGISTRAR, RETIRAR, STOCK, REPORTES) ---
 if opcion == "📥 Registrar Entrada":
     st.header("📥 Registrar Producto")
     with st.form("f_reg", clear_on_submit=True):
@@ -148,6 +155,7 @@ elif opcion == "📊 Stock Actual":
     if st.button("💾 Guardar Cambios"):
         guardar_datos(editado)
         st.session_state.inventario_data = editado
+        st.success("Guardado.")
 
 elif opcion == "💾 Reportes Excel":
     st.header("💾 Gestión de Reportes")
