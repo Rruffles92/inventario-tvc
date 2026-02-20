@@ -2,9 +2,21 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+import requests
+from streamlit_lottie import st_lottie
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
+
+# Función para cargar la animación del robot
+def load_lottieurl(url: str):
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+# URL de un robot kawaii animado
+lottie_robot = load_lottieurl("https://lottie.host/8026131b-789d-4899-b903-f09d84656041/7zH665M5K1.json")
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state:
@@ -21,7 +33,7 @@ if not st.session_state["autenticado"]:
             st.error("❌ Contraseña Incorrecta")
     st.stop()
 
-# --- DATOS Y LOGS ---
+# --- DATOS EN MEMORIA ---
 if "inventario_data" not in st.session_state:
     st.session_state.inventario_data = pd.DataFrame(
         columns=["clave", "nombre", "cantidad", "ubicacion"]
@@ -29,103 +41,91 @@ if "inventario_data" not in st.session_state:
 if "historial_descargas" not in st.session_state:
     st.session_state.historial_descargas = []
 
-# --- BARRA LATERAL CON IA KAWAII ---
+# --- BARRA LATERAL CON ROBOT MINIATURA ---
 with st.sidebar:
-    st.markdown("<h2 style='text-align: center;'>🤖</h2>", unsafe_allow_html=True)
-    st.markdown("### <center>Gemini Mini-Bot</center>", unsafe_allow_html=True)
-    st.caption("<center>✨ ¡Hola! Soy tu asistente kawaii de TVC ✨</center>", unsafe_allow_html=True)
+    # Robot animado en miniatura
+    if lottie_robot:
+        st_lottie(lottie_robot, height=120, key="robot_animado")
+    
+    st.markdown("<h3 style='text-align: center;'>Asistente Virtual</h3>", unsafe_allow_html=True)
     st.markdown("---")
     
     opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar/Editar", "💾 Exportar Excel"])
     
     st.markdown("---")
     st.markdown("### 🛠️ *Consultas IA*")
-    pregunta = st.text_input("Pregúntame algo:", placeholder="Ej: ¿Qué hay poco?")
+    pregunta = st.text_input("¿En qué puedo ayudarte?", placeholder="Ej: ¿Hay stock bajo?")
     
-    # Lógica de IA Kawaii
     df = st.session_state.inventario_data
     if pregunta:
-        if "poco" in pregunta.lower() or "bajo" in pregunta.lower():
+        if "bajo" in pregunta.lower() or "poco" in pregunta.lower():
             bajos = df[df['cantidad'].astype(int) < 5]
             if not bajos.empty:
-                st.warning("⚠️ ¡Atención! Estos productos se están agotando:")
+                st.warning("🤖 ¡Cuidado! Estos productos se agotan:")
                 st.dataframe(bajos[['clave', 'cantidad']], hide_index=True)
             else:
-                st.success("🤖 ¡Todo bien! Tienes buen stock de todo.")
+                st.success("🤖 ¡Todo bien! Tienes suficiente stock.")
         elif not df.empty:
             res = df[df.apply(lambda r: pregunta.lower() in str(r).lower(), axis=1)]
             if not res.empty:
-                st.write("🔍 Encontré esto:")
+                st.write("🔍 Esto fue lo que encontré:")
                 st.table(res[['clave', 'cantidad']])
             else:
-                st.write("🤖 No veo nada con ese nombre...")
-        else:
-            st.error("🤖 ¡El inventario está vacío!")
+                st.write("🤖 No encontré ese producto...")
 
-# --- 💾 SECCIÓN: EXPORTAR Y GESTIONAR (ARRIBA) ---
+# --- SECCIÓN: EXPORTAR EXCEL (CON GESTIÓN SUPERIOR) ---
 if opcion == "💾 Exportar Excel":
     st.header("💾 Gestión de Documentos")
     
-    # Gestión manual del historial en la parte superior
+    # Gestión manual del historial arriba
     if st.session_state.historial_descargas:
-        st.subheader("🗑️ Historial de la sesión")
+        st.subheader("🗑️ Historial (Selecciona para borrar)")
         df_hist = pd.DataFrame(st.session_state.historial_descargas, columns=["Archivo"])
-        hist_edit = st.data_editor(df_hist, num_rows="dynamic", use_container_width=True, key="superior_del")
+        hist_edit = st.data_editor(df_hist, num_rows="dynamic", use_container_width=True, key="del_hist")
         
-        if st.button("🗑️ Eliminar seleccionados del historial", type="primary"):
+        if st.button("🗑️ Borrar archivos seleccionados", type="primary"):
             st.session_state.historial_descargas = hist_edit["Archivo"].tolist()
             st.rerun()
     
     st.divider()
 
-    # Botón de descarga con hora real
+    # Botón de descarga con hora exacta
     if not st.session_state.inventario_data.empty:
         ahora = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
-        nombre_file = f"Stock_TVC_{ahora}.xlsx"
+        nombre_archivo = f"Stock_TVC_{ahora}.xlsx"
         
-        out = BytesIO()
-        with pd.ExcelWriter(out, engine='openpyxl') as writer:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
             st.session_state.inventario_data.to_excel(writer, index=False)
         
-        if st.download_button(label=f"📥 Descargar ahora ({ahora})", data=out.getvalue(), file_name=nombre_file):
-            if nombre_file not in st.session_state.historial_descargas:
-                st.session_state.historial_descargas.append(nombre_file)
+        if st.download_button(label=f"📥 Bajar Excel ({ahora})", data=output.getvalue(), file_name=nombre_archivo):
+            if nombre_archivo not in st.session_state.historial_descargas:
+                st.session_state.historial_descargas.append(nombre_archivo)
                 st.rerun()
 
-# --- 📊 STOCK ACTUAL ---
+# --- SECCIÓN: STOCK ACTUAL ---
 elif opcion == "📊 Stock Actual":
     st.header("📋 Inventario Editable")
     if st.session_state.inventario_data.empty:
-        st.info("No hay productos.")
+        st.info("No hay productos registrados.")
     else:
-        # Edición directa
-        edit = st.data_editor(st.session_state.inventario_data, use_container_width=True, num_rows="dynamic")
+        # Edición directa en tabla
+        editado = st.data_editor(st.session_state.inventario_data, use_container_width=True, num_rows="dynamic")
         if st.button("💾 Guardar cambios"):
-            st.session_state.inventario_data = edit
-            st.success("✅ ¡Actualizado!")
+            st.session_state.inventario_data = editado
+            st.success("✅ ¡Inventario actualizado!")
 
-# --- 📥 REGISTRAR/EDITAR ---
+# --- SECCIÓN: REGISTRAR/EDITAR ---
 elif opcion == "📥 Registrar/Editar":
-    st.header("📥 Registro / Actualización")
-    with st.form("form_tvc", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
+    st.header("📥 Entrada de Mercancía")
+    with st.form("tvc_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
             sku = st.text_input("Clave").strip()
             nom = st.text_input("Nombre")
-        with c2:
-            cant = st.number_input("Cantidad a sumar", min_value=1)
-            ubica = st.text_input("Ubicación")
+        with col2:
+            cant = st.number_input("Cantidad", min_value=1, value=1)
+            ubi = st.text_input("Ubicación")
         
-        if st.form_submit_button("🚀 Guardar"):
-            if sku and nom:
-                df = st.session_state.inventario_data
-                if sku.lower() in df['clave'].astype(str).str.lower().values:
-                    idx = df[df['clave'].astype(str).str.lower() == sku.lower()].index[0]
-                    df.at[idx, 'cantidad'] += cant
-                    st.success(f"✅ Se sumaron {cant} unidades a {sku}.")
-                else:
-                    nueva = pd.DataFrame([[sku, nom, cant, ubica]], columns=df.columns)
-                    st.session_state.inventario_data = pd.concat([df, nueva], ignore_index=True)
-                    st.success(f"✅ {sku} registrado correctamente.")
-            else:
-                st.warning("Escribe Clave y Nombre.")
+        if st.form_submit_button("🚀 Guardar en Memoria"):
+            if sku and
