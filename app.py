@@ -39,24 +39,22 @@ if verificar_password():
         if os.path.exists(HISTORIAL_FILE): return pd.read_excel(HISTORIAL_FILE)
         return pd.DataFrame(columns=['Fecha', 'Folio', 'Productos', 'Total'])
 
-    def guardar_en_historial(folio, productos_texto, total):
+    def guardar_en_historial(df_historial):
+        df_historial.to_excel(HISTORIAL_FILE, index=False)
+
+    def registrar_venta_historial(folio, productos_texto, total):
         historial = cargar_historial()
         nueva_venta = pd.DataFrame([[datetime.now().strftime('%d/%m/%Y %H:%M:%S'), folio, productos_texto, total]], 
                                    columns=['Fecha', 'Folio', 'Productos', 'Total'])
         historial = pd.concat([historial, nueva_venta], ignore_index=True)
-        historial.to_excel(HISTORIAL_FILE, index=False)
+        guardar_en_historial(historial)
 
-    # --- GENERADOR DE FOLIOS PERSONALIZADO ---
     def generar_folio_corto():
-        tipo = random.choice([4, 6]) # Decide si será de 4 o 6 números
+        tipo = random.choice([4, 6])
         if tipo == 4:
-            fijo = random.randint(10, 99) # Primeros 2 fijos
-            variable = random.randint(10, 99) # Últimos 2 cambian
-            return f"{fijo}{variable}"
+            return f"{random.randint(10, 99)}{random.randint(10, 99)}"
         else:
-            fijo = random.randint(100, 999) # Primeros 3 fijos
-            variable = random.randint(100, 999) # Últimos 3 cambian
-            return f"{fijo}{variable}"
+            return f"{random.randint(100, 999)}{random.randint(100, 999)}"
 
     df = cargar_inventario()
     if 'carrito' not in st.session_state: st.session_state.carrito = []
@@ -71,81 +69,88 @@ if verificar_password():
     # --- PUNTO DE VENTA ---
     if opcion == "🛒 Punto de Venta":
         st.header("🛒 Punto de Venta")
-        col1, col2 = st.columns([1, 1.5])
+        col1, col2 = st.columns([1, 1.8])
         
         with col1:
-            st.subheader("Agregar al Carrito")
+            st.subheader("Búsqueda")
             cod = st.text_input("Escanea o escribe Clave:", key="scanner").upper()
             if cod:
                 if cod in df['Clave'].values:
                     p = df[df['Clave'] == cod].iloc[0]
-                    st.info(f"Producto: *{p['Nombre']}* | Stock: {p['Cantidad']}")
+                    st.info(f"*{p['Nombre']}*\n\nDisponible: {p['Cantidad']}")
                     cant_pedida = st.number_input("Cantidad:", min_value=1, max_value=int(p['Cantidad']), value=1)
                     if st.button("➕ Agregar"):
                         for _ in range(int(cant_pedida)):
                             st.session_state.carrito.append({'Clave': p['Clave'], 'Nombre': p['Nombre'], 'Precio': p['Precio']})
-                        st.success(f"Añadido {p['Nombre']}")
                         st.rerun()
                 else: st.error("No encontrado")
 
         with col2:
-            st.subheader("Detalle de Venta")
+            st.subheader("🛒 Carrito (Producto, Cantidad, Precio)")
             if st.session_state.carrito:
-                res = pd.DataFrame(st.session_state.carrito).groupby(['Clave', 'Nombre', 'Precio']).size().reset_index(name='Cant')
-                res['Subtotal'] = res['Cant'] * res['Precio']
-                st.table(res.style.format({"Precio": "${:,.2f}", "Subtotal": "${:,.2f}"}))
-                total = res['Subtotal'].sum()
-                st.write(f"## TOTAL: ${total:,.2f} MXN")
+                res = pd.DataFrame(st.session_state.carrito).groupby(['Clave', 'Nombre', 'Precio']).size().reset_index(name='Cantidad')
+                res['Subtotal'] = res['Cantidad'] * res['Precio']
                 
-                if st.button("🚀 Finalizar y Generar Factura"):
+                tabla_visual = res[['Nombre', 'Cantidad', 'Precio']].rename(columns={'Nombre': 'Producto'})
+                tabla_visual['Precio'] = tabla_visual['Precio'].map('${:,.2f} MXN'.format)
+                st.table(tabla_visual)
+                
+                total = res['Subtotal'].sum()
+                st.markdown(f"### TOTAL: :green[${total:,.2f} MXN]")
+                
+                if st.button("🚀 Realizar Factura"):
                     fol = generar_folio_corto()
                     txt_imprimir = ""
                     for _, r in res.iterrows():
-                        df.loc[df['Clave'] == r['Clave'], 'Cantidad'] -= r['Cant']
-                        txt_imprimir += f"{r['Cant']}x {r['Nombre']} - ${r['Subtotal']:,.2f}<br>"
+                        df.loc[df['Clave'] == r['Clave'], 'Cantidad'] -= r['Cantidad']
+                        txt_imprimir += f"{r['Cantidad']}x {r['Nombre']} - ${r['Subtotal']:,.2f}<br>"
                     
                     guardar_inventario(df)
-                    guardar_en_historial(fol, txt_imprimir.replace("<br>", " | "), total)
+                    registrar_venta_historial(fol, txt_imprimir.replace("<br>", " | "), total)
                     
-                    # HTML PARA IMPRESIÓN DIRECTA
                     ticket_html = f"""
-                    <div id="ticket" style="font-family: Arial, sans-serif; width: 300px; padding: 10px; border: 1px solid #000;">
+                    <div style="font-family: monospace; width: 280px; padding: 15px; border: 1px dashed #000; background: #fff;">
                         <h2 style="text-align: center;">TVC SAN NICOLÁS</h2>
-                        <p><strong>FOLIO:</strong> {fol}</p>
-                        <p><strong>FECHA:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-                        <hr>
-                        <p>{txt_imprimir}</p>
-                        <hr>
-                        <h3>TOTAL: ${total:,.2f} MXN</h3>
-                        <p style="text-align: center;">¡Gracias por su compra!</p>
+                        <hr><p><strong>FOLIO:</strong> {fol}</p>
+                        <p><strong>FECHA:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p><hr>
+                        <div style="font-size: 13px;">{txt_imprimir}</div><hr>
+                        <h3 style="text-align: right;">TOTAL: ${total:,.2f} MXN</h3>
                     </div>
-                    <button onclick="window.print();" style="padding: 10px; background: #2ecc71; color: white; border: none; cursor: pointer;">🖨️ IMPRIMIR AHORA</button>
+                    <br><button onclick="window.print();" style="width: 100%; padding: 10px; background: #2ecc71; color: white; border: none; cursor: pointer;">🖨️ IMPRIMIR TICKET</button>
                     """
-                    components.html(ticket_html, height=400)
+                    components.html(ticket_html, height=450)
                     st.session_state.carrito = []
-                    st.success(f"Venta registrada. Folio generado: {fol}")
             else: st.info("Carrito vacío")
 
-    # --- MANTENIMIENTO DE OTROS MENÚS ---
-    elif opcion == "📊 Stock y Edición":
-        st.header("📋 Inventario Actual")
-        st.dataframe(df.style.format({"Precio": "${:,.2f} MXN"}), use_container_width=True)
-        with st.expander("📝 Editar un producto"):
-            sel = st.selectbox("Clave:", df['Clave'] + " - " + df['Nombre'])
-            idx = df[df['Clave'] == sel.split(" - ")[0]].index[0]
-            n_nom = st.text_input("Nombre", value=df.at[idx, 'Nombre'])
-            n_can = st.number_input("Cantidad", value=int(df.at[idx, 'Cantidad']))
-            n_pre = st.number_input("Precio", value=float(df.at[idx, 'Precio']))
-            if st.button("Guardar Cambios"):
-                df.at[idx, 'Nombre'], df.at[idx, 'Cantidad'], df.at[idx, 'Precio'] = n_nom, n_can, n_pre
-                guardar_inventario(df); st.success("Actualizado"); st.rerun()
+    # --- HISTORIAL CON OPCIÓN DE BORRAR ---
+    elif opcion == "📜 Historial":
+        st.header("📜 Historial de Facturación")
+        hist = cargar_historial()
+        
+        if not hist.empty:
+            # Mostrar tabla
+            st.dataframe(hist.sort_values(by='Fecha', ascending=False), use_container_width=True)
+            
+            st.markdown("---")
+            st.subheader("🗑️ Eliminar Registro de Factura")
+            folio_a_borrar = st.selectbox("Selecciona el Folio de la factura que deseas eliminar:", hist['Folio'].astype(str))
+            
+            if st.button("⚠️ Borrar Factura Permanentemente"):
+                # Filtrar el historial eliminando el folio seleccionado
+                nuevo_historial = hist[hist['Folio'].astype(str) != folio_a_borrar]
+                guardar_en_historial(nuevo_historial)
+                st.error(f"Factura con Folio {folio_a_borrar} eliminada correctamente.")
+                st.rerun()
+        else:
+            st.warning("No hay registros de ventas todavía.")
 
-    elif opcion == "📍 Ubicaciones":
-        st.header("📍 Ubicaciones")
-        st.dataframe(df[['Clave', 'Nombre', 'Ubicacion']], use_container_width=True)
+    # --- OTROS MENÚS ---
+    elif opcion == "📊 Stock y Edición":
+        st.header("📋 Stock Actual")
+        st.dataframe(df.style.format({"Precio": "${:,.2f} MXN"}), use_container_width=True)
 
     elif opcion == "📥 Registrar Entrada":
-        st.header("📥 Entrada de Mercancía")
+        st.header("📥 Entrada")
         with st.form("in"):
             c, n = st.text_input("Clave").upper(), st.text_input("Nombre")
             ca, u, p = st.number_input("Cantidad", 1), st.text_input("Ubicación"), st.number_input("Precio MXN")
@@ -155,13 +160,9 @@ if verificar_password():
                     df.at[idx, 'Cantidad'] += ca; df.at[idx, 'Precio'] = p
                 else:
                     df = pd.concat([df, pd.DataFrame([[c, n, ca, u, p]], columns=df.columns)], ignore_index=True)
-                guardar_inventario(df); st.success("Listo")
-
-    elif opcion == "📜 Historial":
-        st.header("📜 Historial de Ventas")
-        st.dataframe(cargar_historial().sort_values(by='Fecha', ascending=False), use_container_width=True)
+                guardar_inventario(df); st.success("Guardado"); st.rerun()
 
     elif opcion == "💾 Descargar":
         out = BytesIO()
         with pd.ExcelWriter(out, engine='openpyxl') as w: df.to_excel(w, index=False)
-        st.download_button("📥 Descargar Inventario Excel", out.getvalue(), "inventario_tvc.xlsx")
+        st.download_button("📥 Bajar Excel", out.getvalue(), "inventario_tvc.xlsx")
