@@ -1,28 +1,36 @@
 import streamlit as st
 import pandas as pd
+import os
 from io import BytesIO
 from datetime import datetime
 import requests
 from streamlit_lottie import st_lottie
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
+DB_FILE = "inventario_tvc.csv"
 
-# Función robusta para cargar la animación
+# Funciones de persistencia de datos
+def cargar_datos():
+    if os.path.exists(DB_FILE):
+        return pd.read_csv(DB_FILE)
+    return pd.DataFrame(columns=["clave", "nombre", "cajas", "piezas_por_caja", "piezas_sueltas", "ubicacion"])
+
+def guardar_datos(df):
+    df.to_csv(DB_FILE, index=False)
+
+# Inicializar datos
+if "inventario_data" not in st.session_state:
+    st.session_state.inventario_data = cargar_datos()
+
+# --- ASISTENTE VIRTUAL (Robot) ---
 def load_lottieurl(url: str):
     try:
         r = requests.get(url, timeout=5)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except Exception as e:
-        # Esto te ayudará a saber si hay un error de conexión
-        st.sidebar.error(f"Error cargando robot: {e}")
-        return None
+        return r.json() if r.status_code == 200 else None
+    except: return None
 
-# URL verificada de un robot animado (Lottie)
-url_robot = "https://lottie.host/8026131b-789d-4899-b903-f09d84656041/7zH665M5K1.json"
-lottie_robot = load_lottieurl(url_robot)
+lottie_robot = load_lottieurl("https://lottie.host/8026131b-789d-4899-b903-f09d84656041/7zH665M5K1.json")
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state:
@@ -35,42 +43,34 @@ if not st.session_state["autenticado"]:
         if password == "TVCsanicolas":
             st.session_state["autenticado"] = True
             st.rerun()
-        else:
-            st.error("❌ Contraseña Incorrecta")
+        else: st.error("❌ Incorrecta")
     st.stop()
 
-# --- DATOS EN MEMORIA ---
-if "inventario_data" not in st.session_state:
-    st.session_state.inventario_data = pd.DataFrame(
-        columns=["clave", "nombre", "cajas", "piezas_por_caja", "piezas_sueltas", "ubicacion"]
-    )
-if "historial_descargas" not in st.session_state:
-    st.session_state.historial_descargas = []
-
-# --- BARRA LATERAL (Donde aparece el robot) ---
+# --- BARRA LATERAL ---
 with st.sidebar:
-    # Si la animación cargó correctamente, se muestra aquí
     if lottie_robot:
-        st_lottie(lottie_robot, height=150, key="robot_sidebar")
-    else:
-        # Si no aparece, mostramos un emoji grande como respaldo
-        st.markdown("<h1 style='text-align: center;'>🤖</h1>", unsafe_allow_html=True)
-        st.caption("No se pudo cargar la animación (revisa tu conexión)")
-
+        st_lottie(lottie_robot, height=120, key="robot_sidebar")
     st.markdown("<h3 style='text-align: center;'>Asistente Virtual</h3>", unsafe_allow_html=True)
     st.markdown("---")
-    
-    opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Exportar Excel"])
-    
-    st.markdown("---")
-    st.markdown("### 🛠️ *Consultas IA*")
-    pregunta = st.text_input("¿En qué puedo ayudarte?")
-    # ... (lógica de consultas IA igual que antes)
+    opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
 
-# --- SECCIÓN: REGISTRAR ENTRADA ---
-if opcion == "📥 Registrar Entrada":
+# --- SECCIONES ---
+if opcion == "📊 Stock Actual":
+    st.header("📋 Inventario Editable")
+    df = st.session_state.inventario_data
+    if df.empty:
+        st.info("No hay productos.")
+    else:
+        # Edición directa
+        editado = st.data_editor(df, use_container_width=True, num_rows="dynamic")
+        if st.button("💾 Guardar cambios"):
+            st.session_state.inventario_data = editado
+            guardar_datos(editado)
+            st.success("✅ ¡Guardado permanente!")
+
+elif opcion == "📥 Registrar Entrada":
     st.header("📥 Entrada de Mercancía")
-    with st.form("tvc_form", clear_on_submit=True):
+    with st.form("form_in", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             sku = st.text_input("Clave").strip()
@@ -78,81 +78,73 @@ if opcion == "📥 Registrar Entrada":
         with col2:
             ubi = st.text_input("Ubicación")
         
-        st.markdown("---")
         c1, c2, c3 = st.columns(3)
-        with c1:
-            cant_cajas = st.number_input("Número de Cajas", min_value=0, value=1)
-        with c2:
-            capacidad = st.number_input("Piezas por Caja (Capacidad)", min_value=1, value=1)
-        with c3:
-            cant_piezas = st.number_input("Piezas Sueltas extras", min_value=0, value=0)
+        with c1: c_cajas = st.number_input("Cajas", min_value=0, value=1)
+        with c2: c_cap = st.number_input("Piezas por Caja", min_value=1, value=1)
+        with c3: c_sueltas = st.number_input("Piezas Sueltas", min_value=0, value=0)
         
         if st.form_submit_button("🚀 Guardar"):
-            if sku and nom:
+            if sku and nom: # Corregido error de sintaxis
                 df = st.session_state.inventario_data
                 if sku.lower() in df['clave'].astype(str).str.lower().values:
                     idx = df[df['clave'].astype(str).str.lower() == sku.lower()].index[0]
-                    df.at[idx, 'cajas'] += cant_cajas
-                    df.at[idx, 'piezas_sueltas'] += cant_piezas
-                    st.success(f"✅ Stock actualizado para {sku}.")
+                    df.at[idx, 'cajas'] += c_cajas
+                    df.at[idx, 'piezas_sueltas'] += c_sueltas
                 else:
-                    nueva = pd.DataFrame([[sku, nom, cant_cajas, capacidad, cant_piezas, ubi]], columns=df.columns)
-                    st.session_state.inventario_data = pd.concat([df, nueva], ignore_index=True)
-                    st.success(f"✅ Registro creado: {sku}.")
+                    nueva = pd.DataFrame([[sku, nom, c_cajas, c_cap, c_sueltas, ubi]], columns=df.columns)
+                    df = pd.concat([df, nueva], ignore_index=True)
+                
+                st.session_state.inventario_data = df
+                guardar_datos(df)
+                st.success("✅ Guardado.")
                 st.rerun()
 
-# --- SECCIÓN: RETIRAR PRODUCTO ---
 elif opcion == "📤 Retirar Producto":
-    st.header("📤 Retirar Producto")
-    with st.form("form_retirar", clear_on_submit=True):
-        sku_retirar = st.text_input("Escanear Código o ingresar Clave").strip()
-        c1, c2 = st.columns(2)
-        with c1:
-            cajas_out = st.number_input("Cajas a retirar", min_value=0, value=0)
-        with c2:
-            piezas_out = st.number_input("Piezas sueltas a retirar", min_value=0, value=0)
+    st.header("📤 Retirar (Escáner o Manual)")
+    with st.form("form_out", clear_on_submit=True):
+        sku_ret = st.text_input("Escanear Clave").strip()
+        r1, r2 = st.columns(2)
+        with r1: r_caj = st.number_input("Cajas a retirar", min_value=0)
+        with r2: r_pie = st.number_input("Piezas a retirar", min_value=0)
         
-        if st.form_submit_button("✅ Confirmar Salida"):
+        if st.form_submit_button("✅ Confirmar"):
             df = st.session_state.inventario_data
-            if sku_retirar.lower() in df['clave'].astype(str).str.lower().values:
-                idx = df[df['clave'].astype(str).str.lower() == sku_retirar.lower()].index[0]
+            if sku_ret.lower() in df['clave'].astype(str).str.lower().values:
+                idx = df[df['clave'].astype(str).str.lower() == sku_ret.lower()].index[0]
+                df.at[idx, 'cajas'] = max(0, int(df.at[idx, 'cajas']) - r_caj)
+                df.at[idx, 'piezas_sueltas'] = max(0, int(df.at[idx, 'piezas_sueltas']) - r_pie)
                 
-                nueva_cajas = int(df.at[idx, 'cajas']) - cajas_out
-                nueva_piezas = int(df.at[idx, 'piezas_sueltas']) - piezas_out
+                if df.at[idx, 'cajas'] == 0 and df.at[idx, 'piezas_sueltas'] == 0:
+                    st.error(f"🚨 PRODUCTO AGOTADO. Eliminado de {df.at[idx, 'ubicacion']}.")
+                    df = df.drop(idx)
                 
-                if nueva_cajas <= 0 and nueva_piezas <= 0:
-                    nombre_prod = df.at[idx, 'nombre']
-                    st.session_state.inventario_data = df.drop(idx).reset_index(drop=True)
-                    st.error(f"🚨 PRODUCTO ELIMINADO: '{nombre_prod}' se agotó y se quitó de la ubicación.")
-                else:
-                    df.at[idx, 'cajas'] = max(0, nueva_cajas)
-                    df.at[idx, 'piezas_sueltas'] = max(0, nueva_piezas)
-                    st.success(f"📦 Retiro exitoso. Quedan {df.at[idx, 'cajas']} cajas.")
+                st.session_state.inventario_data = df
+                guardar_datos(df)
                 st.rerun()
-            else:
-                st.error("❌ Clave no encontrada.")
 
-# --- SECCIÓN: STOCK ACTUAL ---
-elif opcion == "📊 Stock Actual":
-    st.header("📋 Inventario Editable")
-    if st.session_state.inventario_data.empty:
-        st.info("Inventario vacío.")
-    else:
-        editado = st.data_editor(st.session_state.inventario_data, use_container_width=True, num_rows="dynamic")
-        if st.button("💾 Guardar cambios"):
-            st.session_state.inventario_data = editado
-            st.success("✅ Cambios guardados.")
-
-# --- SECCIÓN: EXPORTAR EXCEL ---
-elif opcion == "💾 Exportar Excel":
-    st.header("💾 Generar Reporte")
+elif opcion == "💾 Reportes Excel":
+    st.header("💾 Exportar y Gestionar")
     if not st.session_state.inventario_data.empty:
-        df_excel = st.session_state.inventario_data.copy()
-        df_excel['TOTAL_PIEZAS'] = (df_excel['cajas'] * df_excel['piezas_por_caja']) + df_excel['piezas_sueltas']
+        # Cálculo de piezas totales para el reporte
+        df_ex = st.session_state.inventario_data.copy()
+        df_ex['TOTAL_PIEZAS'] = (df_ex['cajas'] * df_ex['piezas_por_caja']) + df_ex['piezas_sueltas']
         
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_excel.to_excel(writer, index=False)
+            df_ex.to_excel(writer, index=False)
         
-        ahora = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
-        st.download_button(label=f"📥 Bajar Excel ({ahora})", data=output.getvalue(), file_name=f"Reporte_TVC_{ahora}.xlsx")
+        fecha = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
+        st.download_button(f"📥 Bajar Excel ({fecha})", data=output.getvalue(), file_name=f"Stock_TVC_{fecha}.xlsx")
+        
+        # Historial de sesión con opción de borrar
+        if "hist" not in st.session_state: st.session_state.hist = []
+        if st.button("Añadir esta descarga al historial"):
+            st.session_state.hist.append(f"Stock_TVC_{fecha}.xlsx")
+        
+        st.divider()
+        if st.session_state.hist:
+            st.subheader("🗑️ Historial de archivos")
+            para_borrar = st.multiselect("Selecciona para quitar de la lista:", st.session_state.hist)
+            if st.button("Borrar seleccionados"):
+                st.session_state.hist = [h for h in st.session_state.hist if h not in para_borrar]
+                st.rerun()
