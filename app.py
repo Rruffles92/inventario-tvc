@@ -4,8 +4,18 @@ import os
 from io import BytesIO
 from datetime import datetime
 
-# --- CONFIGURACIÓN ---
+# --- BLOQUEO DE ESTRUCTURA Y MENÚS ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
+
+# Ocultar botones técnicos de Streamlit para proteger la estructura del programa
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
 DB_FILE = "inventario_tvc.csv"
 HISTORIAL_FILE = "historial_reportes.txt"
 
@@ -33,15 +43,15 @@ if "inventario_data" not in st.session_state:
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
 
-# --- SEGURIDAD ---
+# --- ACCESO ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
-    st.session_state["usuario_actual"] = "Invitado"
+    st.session_state["usuario_actual"] = ""
 
 if not st.session_state["autenticado"]:
     st.title("🔐 Acceso TVC San Nicolás")
-    nombre_login = st.text_input("Tu Nombre:")
+    nombre_login = st.text_input("Tu Nombre:").strip().lower()
     pass_login = st.text_input("Contraseña:", type="password")
     if st.button("Entrar"):
         if pass_login == "TVCsanicolas" and nombre_login != "":
@@ -55,53 +65,42 @@ if not st.session_state["autenticado"]:
 usuario = st.session_state["usuario_actual"]
 df_actual = st.session_state.inventario_data
 
-# ALERTA AUTOMÁTICA (3 cajas o menos)
+# ALERTA DE STOCK (3 CAJAS O MENOS)
 bajos_auto = df_actual[df_actual['cajas'].astype(int) <= 3]
 if not bajos_auto.empty:
-    st.error(f"🚨 *¡ATENCIÓN {usuario.upper()}!* Quedan 3 cajas o menos de: {', '.join(bajos_auto['nombre'].tolist())}")
+    st.error(f"🚨 *ALERTA DE RELLENO:* {', '.join(bajos_auto['nombre'].tolist())}")
 
 with st.sidebar:
     st.title("TVC System")
-    st.write(f"👤 Hola, *{usuario}*")
+    st.write(f"👤 Usuario: *{usuario.capitalize()}*")
+    
+    # Menús estáticos: La estructura de navegación no se puede cambiar
     opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
     
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    
-    # CHAT IA (Recuadro Negro con búsqueda mejorada)
-    st.markdown(f"""
-        <div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: #ffffff;">
-            <p style="margin: 0; font-weight: bold; color: black; font-size: 14px;">🤖 Asistente IA ({usuario})</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""<div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: white;">
+        <p style="margin: 0; font-weight: bold; color: black;">🤖 Asistente IA ({usuario})</p></div>""", unsafe_allow_html=True)
     
     pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia")
     if pregunta:
         p = pregunta.lower().strip()
-        # Búsqueda de totales (DHT5684, etc)
+        # Búsqueda de cualquier producto (como DHT5684)
         if any(x in p for x in ["cuanto hay", "total", "cantidad"]):
-            busqueda = p.replace("cuanto hay de", "").replace("total de", "").replace("cuanto hay", "").strip()
+            busqueda = p.replace("cuanto hay de", "").replace("total de", "").strip()
             res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
             if not res.empty:
                 prod = res.iloc[0]
-                st.info(f"📦 {usuario}, de *{prod['nombre']}* hay: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas*.")
-            else: st.warning(f"🔍 No encuentro nada para '{busqueda}', {usuario}.")
-        elif any(x in p for x in ["donde", "ubica"]):
-            busqueda = p.replace("donde esta", "").replace("donde", "").strip()
-            res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
-            if not res.empty: st.info(f"📍 Ubicación: *{res.iloc[0]['ubicacion']}*")
+                st.info(f"📦 Raúl, de *{prod['nombre']}* hay: {prod['cajas']} cajas y {prod['piezas_sueltas']} piezas.")
             else: st.warning("🔍 No encontrado.")
 
-# --- SECCIONES ---
+# --- SECCIONES DE USO ---
 if opcion == "📊 Stock Actual":
-    st.header("📋 Inventario")
-    editado = st.data_editor(df_actual, use_container_width=True)
-    if st.button("💾 Guardar Cambios"):
-        guardar_datos(editado)
-        st.session_state.inventario_data = editado
-        st.success("Guardado correctamente.")
+    st.header("📋 Inventario (Solo Lectura)")
+    # Se muestra la tabla pero sin permisos de edición de estructura
+    st.dataframe(df_actual, use_container_width=True)
 
 elif opcion == "📥 Registrar Entrada":
-    st.header("📥 Registrar Producto")
+    st.header("📥 Registrar Entrada")
     with st.form("f_reg", clear_on_submit=True):
         col1, col2 = st.columns(2)
         sku = col1.text_input("Clave")
@@ -125,8 +124,8 @@ elif opcion == "📥 Registrar Entrada":
             st.rerun()
 
 elif opcion == "📤 Retirar Producto":
-    st.header("📤 Retirar Piezas")
-    sku_ret = st.text_input("Escanea Clave:").strip()
+    st.header("📤 Retirar Producto")
+    sku_ret = st.text_input("Escribe la Clave:").strip()
     if sku_ret:
         mask = df_actual['clave'].astype(str).str.lower() == sku_ret.lower()
         if mask.any():
@@ -134,7 +133,7 @@ elif opcion == "📤 Retirar Producto":
             item = df_actual.loc[idx]
             st.info(f"📦 {item['nombre']} | {item['piezas_sueltas']} sueltas")
             with st.form("f_ret"):
-                cant = st.number_input("Piezas a quitar", min_value=0, max_value=int(item['piezas_sueltas']))
+                cant = st.number_input("Cantidad a quitar", min_value=1, max_value=int(item['piezas_sueltas']))
                 if st.form_submit_button("Descontar"):
                     df_actual.at[idx, 'piezas_sueltas'] -= cant
                     guardar_datos(df_actual)
@@ -142,32 +141,27 @@ elif opcion == "📤 Retirar Producto":
                     st.rerun()
 
 elif opcion == "💾 Reportes Excel":
-    st.header("💾 Gestión de Reportes")
-    nombre_rep = f"Reporte_{datetime.now().strftime('%d-%m-%Y_%Hh%M')}.xlsx"
+    st.header("💾 Reportes Disponibles")
+    if st.button("➕ Generar Nuevo Reporte"):
+        n_rep = f"Reporte_{datetime.now().strftime('%d-%m-%Y_%Hh%M')}.xlsx"
+        st.session_state.historial.append(n_rep)
+        guardar_historial(st.session_state.historial)
+        st.rerun()
     
-    if st.button("➕ Generar Reporte"):
-        if nombre_rep not in st.session_state.historial:
-            st.session_state.historial.append(nombre_rep)
-            guardar_historial(st.session_state.historial)
-            st.rerun()
-
     st.divider()
-    
-    # LISTA DE REPORTES CON DESCARGA
     if st.session_state.historial:
-        # Generar Excel para descarga
+        # Preparar datos de descarga
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_actual.to_excel(writer, index=False)
         excel_data = output.getvalue()
 
         for i, n in enumerate(st.session_state.historial):
-            col_nom, col_desc, col_borr = st.columns([3, 1, 1])
-            col_nom.write(f"📄 {n}")
-            # Botón de Descarga
-            col_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"desc_{i}")
-            # Botón de Borrado
-            if col_borr.button("🗑️ Borrar", key=f"borr_{i}"):
+            c_nom, c_desc, c_borr = st.columns([3, 1, 1])
+            c_nom.write(f"📄 {n}")
+            c_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"d_{i}")
+            # Habilitado el borrado para TODOS los usuarios
+            if c_borr.button("🗑️ Borrar", key=f"b_{i}"):
                 st.session_state.historial.pop(i)
                 guardar_historial(st.session_state.historial)
                 st.rerun()
