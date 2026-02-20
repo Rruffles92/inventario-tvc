@@ -67,7 +67,7 @@ with st.sidebar:
     
     st.markdown("<br><br>", unsafe_allow_html=True)
     
-    # CHAT IA (Recuadro Negro)
+    # CHAT IA (Recuadro Negro con búsqueda mejorada)
     st.markdown(f"""
         <div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: #ffffff;">
             <p style="margin: 0; font-weight: bold; color: black; font-size: 14px;">🤖 Asistente IA ({usuario})</p>
@@ -77,17 +77,18 @@ with st.sidebar:
     pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia")
     if pregunta:
         p = pregunta.lower().strip()
-        if any(x in p for x in ["cuanto hay", "total de"]):
-            busqueda = p.replace("cuanto hay de", "").replace("total de", "").strip()
+        # Búsqueda de totales (DHT5684, etc)
+        if any(x in p for x in ["cuanto hay", "total", "cantidad"]):
+            busqueda = p.replace("cuanto hay de", "").replace("total de", "").replace("cuanto hay", "").strip()
             res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
             if not res.empty:
                 prod = res.iloc[0]
                 st.info(f"📦 {usuario}, de *{prod['nombre']}* hay: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas*.")
-            else: st.warning("🔍 No lo encuentro.")
+            else: st.warning(f"🔍 No encuentro nada para '{busqueda}', {usuario}.")
         elif any(x in p for x in ["donde", "ubica"]):
             busqueda = p.replace("donde esta", "").replace("donde", "").strip()
             res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
-            if not res.empty: st.info(f"📍 Está en: *{res.iloc[0]['ubicacion']}*")
+            if not res.empty: st.info(f"📍 Ubicación: *{res.iloc[0]['ubicacion']}*")
             else: st.warning("🔍 No encontrado.")
 
 # --- SECCIONES ---
@@ -97,6 +98,7 @@ if opcion == "📊 Stock Actual":
     if st.button("💾 Guardar Cambios"):
         guardar_datos(editado)
         st.session_state.inventario_data = editado
+        st.success("Guardado correctamente.")
 
 elif opcion == "📥 Registrar Entrada":
     st.header("📥 Registrar Producto")
@@ -151,9 +153,9 @@ elif opcion == "💾 Reportes Excel":
 
     st.divider()
     
-    # Mostrar lista con opción de DESCARGA y BORRADO
+    # LISTA DE REPORTES CON DESCARGA
     if st.session_state.historial:
-        # Preparamos el archivo Excel en memoria para la descarga
+        # Generar Excel para descarga
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_actual.to_excel(writer, index=False)
@@ -162,10 +164,10 @@ elif opcion == "💾 Reportes Excel":
         for i, n in enumerate(st.session_state.historial):
             col_nom, col_desc, col_borr = st.columns([3, 1, 1])
             col_nom.write(f"📄 {n}")
-            # Botón de Descarga agregado
-            col_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"d_{i}")
-            # Botón de Borrado (el de la basura)
-            if col_borr.button("🗑️ Borrar", key=f"b_{i}"):
+            # Botón de Descarga
+            col_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"desc_{i}")
+            # Botón de Borrado
+            if col_borr.button("🗑️ Borrar", key=f"borr_{i}"):
                 st.session_state.historial.pop(i)
                 guardar_historial(st.session_state.historial)
                 st.rerun()
