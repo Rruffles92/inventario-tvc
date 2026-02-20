@@ -36,12 +36,15 @@ if "inventario_data" not in st.session_state:
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
 
-# --- ASISTENTE VIRTUAL ---
+# --- ASISTENTE VIRTUAL (ROBOT) ---
 def load_lottieurl(url: str):
     try:
         r = requests.get(url, timeout=5)
-        return r.json() if r.status_code == 200 else None
-    except: return None
+        if r.status_code == 200:
+            return r.json()
+        return None
+    except:
+        return None
 
 lottie_robot = load_lottieurl("https://lottie.host/8026131b-789d-4899-b903-f09d84656041/7zH665M5K1.json")
 
@@ -56,13 +59,14 @@ if not st.session_state["autenticado"]:
         if password == "TVCsanicolas":
             st.session_state["autenticado"] = True
             st.rerun()
-        else: st.error("❌ Incorrecta")
+        else:
+            st.error("❌ Incorrecta")
     st.stop()
 
 # --- BARRA LATERAL ---
 with st.sidebar:
     if lottie_robot:
-        st_lottie(lottie_robot, height=120, key="robot_sidebar")
+        st_lottie(lottie_robot, height=150, key="robot")
     st.markdown("<h3 style='text-align: center;'>Asistente Virtual</h3>", unsafe_allow_html=True)
     st.markdown("---")
     opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
@@ -96,7 +100,7 @@ elif opcion == "📥 Registrar Entrada":
         with c3: c_sueltas = st.number_input("Piezas Sueltas", min_value=0, value=0)
         
         if st.form_submit_button("🚀 Guardar"):
-            if sku and nom: # CORRECCIÓN LÍNEA 131
+            if sku and nom:
                 df = st.session_state.inventario_data
                 if sku.lower() in df['clave'].astype(str).str.lower().values:
                     idx = df[df['clave'].astype(str).str.lower() == sku.lower()].index[0]
@@ -119,52 +123,55 @@ elif opcion == "📤 Retirar Producto":
             df = st.session_state.inventario_data
             mask = df['clave'].astype(str).str.lower() == sku_ret.lower()
             if mask.any():
-                idx = df[mask].index[0] # CORRECCIÓN LÍNEA 110
+                idx = df[mask].index[0]
                 df.at[idx, 'cajas'] = max(0, int(df.at[idx, 'cajas']) - r_caj)
                 st.session_state.inventario_data = df
                 guardar_datos(df)
                 st.success("✅ Retiro confirmado.")
                 st.rerun()
 
-# --- SECCIÓN: REPORTES EXCEL (CON SELECCIÓN Y BORRADO) ---
+# --- SECCIÓN: REPORTES EXCEL (GESTIÓN Y ELIMINACIÓN) ---
 elif opcion == "💾 Reportes Excel":
     st.header("💾 Exportar y Gestionar Reportes")
 
     # 1. ELIMINAR REPORTES (PARTE SUPERIOR)
     if st.session_state.historial:
         st.subheader("🗑️ Seleccionar y Eliminar del Historial")
-        seleccionados = st.multiselect("Marca los reportes que quieres borrar de la lista:", st.session_state.historial)
+        seleccionados = st.multiselect("Selecciona los archivos que quieres borrar de la lista:", st.session_state.historial)
         
         if st.button("❌ Eliminar seleccionados"):
             st.session_state.historial = [h for h in st.session_state.historial if h not in seleccionados]
             guardar_historial(st.session_state.historial)
-            st.success("Historial actualizado correctamente.")
+            st.success("Lista actualizada.")
             st.rerun()
     else:
-        st.info("No hay reportes en la lista para gestionar.")
+        st.info("La lista de reportes está vacía.")
 
     st.divider()
 
-    # 2. GENERAR REPORTE NUEVO
+    # 2. GENERAR REPORTE NUEVO CON FECHA Y HORA
     if not st.session_state.inventario_data.empty:
         df_ex = st.session_state.inventario_data.copy()
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_ex.to_excel(writer, index=False)
         
-        fecha = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
-        nombre_archivo = f"Stock_TVC_{fecha}.xlsx"
+        # Fecha y hora para el nombre del archivo
+        ahora = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
+        nombre_archivo = f"Reporte_Stock_{ahora}.xlsx"
         
-        # CORRECCIÓN LÍNEA 132
+        st.write(f"*Próximo reporte disponible:* {nombre_archivo}")
+        
         st.download_button(
-            label="📥 Descargar Reporte Actual",
+            label=f"📥 Descargar {nombre_archivo}",
             data=output.getvalue(),
-            file_name=nombre_archivo
+            file_name=nombre_archivo,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-        if st.button("✨ Guardar este nombre en la lista permanente"):
+        if st.button("✨ Guardar este nombre en la lista"):
             if nombre_archivo not in st.session_state.historial:
                 st.session_state.historial.append(nombre_archivo)
                 guardar_historial(st.session_state.historial)
-                st.success(f"Se agregó {nombre_archivo} a la lista.")
+                st.success(f"Guardado: {nombre_archivo}")
                 st.rerun()
