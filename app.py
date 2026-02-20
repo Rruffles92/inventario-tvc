@@ -4,10 +4,10 @@ import os
 from io import BytesIO
 from datetime import datetime
 
-# --- BLOQUEO DE ESTRUCTURA Y MENÚS ---
+# --- CONFIGURACIÓN Y BLOQUEO DE ESTRUCTURA ---
 st.set_page_config(page_title="TVC Control Inventario", layout="wide", page_icon="🤖")
 
-# Ocultar botones técnicos de Streamlit para proteger la estructura del programa
+# Ocultar botones técnicos para que no muevan la estructura del programa
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -65,7 +65,7 @@ if not st.session_state["autenticado"]:
 usuario = st.session_state["usuario_actual"]
 df_actual = st.session_state.inventario_data
 
-# ALERTA DE STOCK (3 CAJAS O MENOS)
+# ALERTA DE STOCK (3 CAJAS)
 bajos_auto = df_actual[df_actual['cajas'].astype(int) <= 3]
 if not bajos_auto.empty:
     st.error(f"🚨 *ALERTA DE RELLENO:* {', '.join(bajos_auto['nombre'].tolist())}")
@@ -74,29 +74,31 @@ with st.sidebar:
     st.title("TVC System")
     st.write(f"👤 Usuario: *{usuario.capitalize()}*")
     
-    # Menús estáticos: La estructura de navegación no se puede cambiar
+    # Menús estáticos protegidos
     opcion = st.radio("Navegar a:", ["📊 Stock Actual", "📥 Registrar Entrada", "📤 Retirar Producto", "💾 Reportes Excel"])
     
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # --- REGRESA EL ASISTENTE IA ---
     st.markdown(f"""<div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: white;">
         <p style="margin: 0; font-weight: bold; color: black;">🤖 Asistente IA ({usuario})</p></div>""", unsafe_allow_html=True)
     
     pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia")
     if pregunta:
         p = pregunta.lower().strip()
-        # Búsqueda de cualquier producto (como DHT5684)
-        if any(x in p for x in ["cuanto hay", "total", "cantidad"]):
-            busqueda = p.replace("cuanto hay de", "").replace("total de", "").strip()
-            res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
-            if not res.empty:
-                prod = res.iloc[0]
-                st.info(f"📦 Raúl, de *{prod['nombre']}* hay: {prod['cajas']} cajas y {prod['piezas_sueltas']} piezas.")
-            else: st.warning("🔍 No encontrado.")
+        # Búsqueda por clave o nombre (DHT5684, etc)
+        res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(p) | df_actual['nombre'].str.lower().str.contains(p)]
+        
+        if not res.empty:
+            prod = res.iloc[0]
+            st.info(f"📦 Raúl, de *{prod['nombre']}* hay: {prod['cajas']} cajas y {prod['piezas_sueltas']} piezas.")
+            st.write(f"📍 Ubicación: {prod['ubicacion']}")
+        else:
+            st.warning(f"🔍 No encontré nada para '{p}', {usuario}.")
 
-# --- SECCIONES DE USO ---
+# --- SECCIONES ---
 if opcion == "📊 Stock Actual":
-    st.header("📋 Inventario (Solo Lectura)")
-    # Se muestra la tabla pero sin permisos de edición de estructura
+    st.header("📋 Inventario Actual")
     st.dataframe(df_actual, use_container_width=True)
 
 elif opcion == "📥 Registrar Entrada":
@@ -141,7 +143,7 @@ elif opcion == "📤 Retirar Producto":
                     st.rerun()
 
 elif opcion == "💾 Reportes Excel":
-    st.header("💾 Reportes Disponibles")
+    st.header("💾 Gestión de Reportes")
     if st.button("➕ Generar Nuevo Reporte"):
         n_rep = f"Reporte_{datetime.now().strftime('%d-%m-%Y_%Hh%M')}.xlsx"
         st.session_state.historial.append(n_rep)
@@ -150,7 +152,6 @@ elif opcion == "💾 Reportes Excel":
     
     st.divider()
     if st.session_state.historial:
-        # Preparar datos de descarga
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_actual.to_excel(writer, index=False)
@@ -160,8 +161,8 @@ elif opcion == "💾 Reportes Excel":
             c_nom, c_desc, c_borr = st.columns([3, 1, 1])
             c_nom.write(f"📄 {n}")
             c_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"d_{i}")
-            # Habilitado el borrado para TODOS los usuarios
-            if c_borr.button("🗑️ Borrar", key=f"b_{i}"):
+            # Botón de borrar habilitado para todos
+            if c_borr.button("🗑️", key=f"b_{i}"):
                 st.session_state.historial.pop(i)
                 guardar_historial(st.session_state.historial)
                 st.rerun()
