@@ -27,7 +27,7 @@ if "inventario_data" not in st.session_state:
         columns=["clave", "nombre", "cantidad", "ubicacion"]
     )
 
-# Historial de archivos generados en la sesión
+# Historial para rastrear los archivos generados
 if "historial_descargas" not in st.session_state:
     st.session_state.historial_descargas = []
 
@@ -80,12 +80,12 @@ elif opcion == "📥 Registrar/Editar":
             else:
                 st.warning("⚠️ Falta Clave o Nombre.")
 
-# --- 💾 EXPORTAR EXCEL CON GESTIÓN DE HISTORIAL ---
+# --- 💾 EXPORTAR EXCEL CON BORRADO MANUAL DE HISTORIAL ---
 elif opcion == "💾 Exportar Excel":
     st.header("💾 Descargar y Gestionar Documentos")
     
     if not st.session_state.inventario_data.empty:
-        # Generar nombre con tiempo real
+        # Generar fecha y hora para el archivo en tiempo real
         ahora = datetime.now().strftime("%d-%m-%Y_%Hh%Mm")
         nombre_archivo = f"Inventario_TVC_{ahora}.xlsx"
         
@@ -93,33 +93,38 @@ elif opcion == "💾 Exportar Excel":
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             st.session_state.inventario_data.to_excel(writer, index=False, sheet_name='Stock')
         
-        # Botón de descarga
+        # Al presionar el botón, se añade al historial visible
         if st.download_button(
             label=f"📥 Generar y Bajar Excel ({ahora})",
             data=output.getvalue(),
             file_name=nombre_archivo,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ):
-            # Agregar al historial de la sesión al hacer clic
             if nombre_archivo not in st.session_state.historial_descargas:
                 st.session_state.historial_descargas.append(nombre_archivo)
+                st.rerun()
 
         st.divider()
         
-        # Gestión del historial
-        st.subheader("📂 Historial de archivos generados")
+        # SECCIÓN PARA BORRAR MANUALMENTE REGISTROS
+        st.subheader("📂 Historial de archivos (Selecciona para borrar)")
         if st.session_state.historial_descargas:
-            st.write("Selecciona los registros de descarga que deseas quitar de esta lista:")
+            # Crear tabla interactiva para que el usuario elija qué borrar
+            df_hist = pd.DataFrame(st.session_state.historial_descargas, columns=["Archivo"])
             
-            # Crear un DataFrame para que el usuario elija qué borrar
-            df_historial = pd.DataFrame(st.session_state.historial_descargas, columns=["Archivo"])
-            df_historial_edit = st.data_editor(df_historial, num_rows="dynamic", use_container_width=True)
+            # El usuario puede borrar filas directamente en esta tabla
+            hist_editado = st.data_editor(
+                df_hist, 
+                num_rows="dynamic", 
+                use_container_width=True,
+                key="editor_historial"
+            )
             
-            if st.button("🗑️ Eliminar registros seleccionados", type="primary"):
-                st.session_state.historial_descargas = df_historial_edit["Archivo"].tolist()
-                st.success("✅ Historial actualizado.")
+            if st.button("🗑️ Borrar archivos seleccionados de la lista", type="primary"):
+                st.session_state.historial_descargas = hist_editado["Archivo"].tolist()
+                st.success("✅ Lista de descargas actualizada.")
                 st.rerun()
         else:
             st.info("Aún no has generado descargas en esta sesión.")
     else:
-        st.warning("No hay datos en el stock para generar un Excel.")
+        st.warning("El inventario está vacío, no hay nada que exportar.")
