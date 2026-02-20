@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 
-# --- 1. CONFIGURACIÓN DE PÁGINA Y SEGURIDAD ---
+# --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="TVC Control Nube", layout="wide")
 
 def verificar_password():
@@ -27,9 +27,9 @@ if verificar_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     def cargar_datos():
-        # Cargamos los datos y limpiamos nombres de columnas por si tienen espacios
         data = conn.read(spreadsheet=URL_HOJA, ttl=0)
-        data.columns = [str(c).strip() for c in data.columns]
+        # Convertimos todos los encabezados a minúsculas para que siempre funcionen
+        data.columns = [str(c).strip().lower() for c in data.columns]
         return data
 
     try:
@@ -51,39 +51,39 @@ if verificar_password():
         st.header("📋 Inventario General (Sincronizado)")
         st.dataframe(df, use_container_width=True)
         
-        if not df.empty and 'Clave' in df.columns:
+        # Verificamos si existe la columna clave (en minúsculas ahora)
+        if not df.empty and 'clave' in df.columns:
             with st.expander("📝 Editar Información de un Producto"):
-                lista_prod = df['Clave'].astype(str) + " - " + df['Nombre'].astype(str)
+                # Creamos la lista para el selector
+                lista_prod = df['clave'].astype(str) + " - " + df['nombre'].astype(str)
                 sel = st.selectbox("Selecciona para editar:", lista_prod)
                 clave_sel = sel.split(" - ")[0]
-                idx = df[df['Clave'].astype(str) == clave_sel].index[0]
+                idx = df[df['clave'].astype(str) == clave_sel].index[0]
                 
                 col_e1, col_e2 = st.columns(2)
-                n_nom = col_e1.text_input("Editar Nombre", value=df.at[idx, 'Nombre'])
-                n_can = col_e2.number_input("Editar Cantidad", value=int(df.at[idx, 'Cantidad']))
-                n_ubi = col_e1.text_input("Editar Ubicación", value=df.at[idx, 'Ubicacion'])
+                n_nom = col_e1.text_input("Editar Nombre", value=df.at[idx, 'nombre'])
+                n_can = col_e2.number_input("Editar Cantidad", value=int(df.at[idx, 'cantidad']) if pd.notnull(df.at[idx, 'cantidad']) else 0)
+                n_ubi = col_e1.text_input("Editar Ubicación", value=df.at[idx, 'ubicacion'])
                 
                 if st.button("💾 Guardar Cambios en la Nube"):
-                    df.at[idx, 'Nombre'] = n_nom
-                    df.at[idx, 'Cantidad'] = n_can
-                    df.at[idx, 'Ubicacion'] = n_ubi
+                    df.at[idx, 'nombre'] = n_nom
+                    df.at[idx, 'cantidad'] = n_can
+                    df.at[idx, 'ubicacion'] = n_ubi
                     conn.update(spreadsheet=URL_HOJA, data=df)
                     st.success("✅ ¡Cambios sincronizados!")
                     st.rerun()
         else:
-            st.warning("No se encontraron columnas válidas o la hoja está vacía. Revisa los encabezados en Google Sheets.")
+            st.warning("⚠️ Revisa que tu Google Sheets tenga los encabezados: clave, nombre, cantidad, ubicacion")
 
-    # --- 4. SECCIÓN: UBICACIONES (CON BUSCADOR) ---
+    # --- 4. SECCIÓN: UBICACIONES ---
     elif opcion == "📍 Ubicaciones":
         st.header("📍 Localización de Mercancía")
         buscar_clave = st.text_input("🔍 Escribe o escanea la CLAVE:").upper()
         
-        if 'Clave' in df.columns:
-            df_visual = df[['Clave', 'Nombre', 'Ubicacion']]
+        if 'clave' in df.columns:
+            df_visual = df[['clave', 'nombre', 'ubicacion']]
             if buscar_clave:
-                df_visual = df_visual[df_visual['Clave'].astype(str).str.contains(buscar_clave, na=False)]
-                if df_visual.empty:
-                    st.warning(f"No se encontró la clave: {buscar_clave}")
+                df_visual = df_visual[df_visual['clave'].astype(str).str.contains(buscar_clave, case=False, na=False)]
             st.dataframe(df_visual, use_container_width=True)
 
     # --- 5. SECCIÓN: REGISTRAR ENTRADA ---
@@ -91,33 +91,30 @@ if verificar_password():
         st.header("📥 Entrada de Mercancía")
         with st.form("entrada_nube"):
             col_in1, col_in2 = st.columns(2)
-            c = col_in1.text_input("Clave").upper()
+            c = col_in1.text_input("Clave").strip()
             n = col_in2.text_input("Nombre")
             ca = col_in1.number_input("Cantidad a sumar", min_value=1, value=1)
             u = col_in2.text_input("Ubicación")
             
             if st.form_submit_button("Sincronizar con Nube"):
-                if 'Clave' in df.columns and c in df['Clave'].astype(str).values:
-                    idx = df[df['Clave'].astype(str) == c].index[0]
-                    df.at[idx, 'Cantidad'] += ca
-                    if u: df.at[idx, 'Ubicacion'] = u
+                if 'clave' in df.columns and c.lower() in df['clave'].astype(str).str.lower().values:
+                    # Si existe, sumamos
+                    idx = df[df['clave'].astype(str).str.lower() == c.lower()].index[0]
+                    df.at[idx, 'cantidad'] = (df.at[idx, 'cantidad'] if pd.notnull(df.at[idx, 'cantidad']) else 0) + ca
+                    if u: df.at[idx, 'ubicacion'] = u
                 else:
+                    # Si no existe, creamos fila nueva
                     nueva_fila = pd.DataFrame([[c, n, ca, u]], columns=df.columns)
                     df = pd.concat([df, nueva_fila], ignore_index=True)
                 
                 conn.update(spreadsheet=URL_HOJA, data=df)
-                st.success("✅ ¡Mercancía guardada en la Nube!")
+                st.success("✅ ¡Guardado en Google Sheets!")
                 st.rerun()
 
-    # --- 6. SECCIÓN: DESCARGAR TODO ---
+    # --- 6. SECCIÓN: DESCARGAR ---
     elif opcion == "💾 Descargar Todo":
-        st.header("💾 Exportar Stock Actual")
+        st.header("💾 Exportar Stock")
         out = BytesIO()
         with pd.ExcelWriter(out, engine='openpyxl') as w: 
             df.to_excel(w, index=False)
-        st.download_button(
-            label="📥 Descargar Excel",
-            data=out.getvalue(),
-            file_name=f"inventario_tvc_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("📥 Descargar Excel", out.getvalue(), f"stock_{datetime.now().strftime('%d_%m')}.xlsx")
