@@ -58,7 +58,6 @@ if verificar_password():
                 clave_sel = sel.split(" - ")[0]
                 idx = df[df['Clave'].astype(str) == clave_sel].index[0]
                 
-                # AQUÍ ESTABA EL ERROR, YA CORREGIDO:
                 col_e1, col_e2 = st.columns(2)
                 n_nom = col_e1.text_input("Editar Nombre", value=df.at[idx, 'Nombre'])
                 n_can = col_e2.number_input("Editar Cantidad", value=int(df.at[idx, 'Cantidad']))
@@ -83,4 +82,41 @@ if verificar_password():
             if df_visual.empty:
                 st.warning(f"No se encontró la clave: {buscar_clave}")
         
-        st.dataframe(df_visual, use_container_width=True
+        st.dataframe(df_visual, use_container_width=True)
+
+    # --- 5. SECCIÓN: REGISTRAR ENTRADA ---
+    elif opcion == "📥 Registrar Entrada":
+        st.header("📥 Entrada de Mercancía")
+        with st.form("entrada_nube"):
+            col_in1, col_in2 = st.columns(2)
+            c = col_in1.text_input("Clave").upper()
+            n = col_in2.text_input("Nombre")
+            ca = col_in1.number_input("Cantidad a sumar", min_value=1, value=1)
+            u = col_in2.text_input("Ubicación")
+            
+            if st.form_submit_button("Sincronizar con Nube"):
+                if c in df['Clave'].astype(str).values:
+                    idx = df[df['Clave'].astype(str) == c].index[0]
+                    df.at[idx, 'Cantidad'] += ca
+                    if u: df.at[idx, 'Ubicacion'] = u
+                else:
+                    nueva_fila = pd.DataFrame([[c, n, ca, u]], columns=df.columns)
+                    df = pd.concat([df, nueva_fila], ignore_index=True)
+                
+                conn.update(spreadsheet=URL_HOJA, data=df)
+                st.success("✅ ¡Mercancía guardada en la Nube!")
+                st.rerun()
+
+    # --- 6. SECCIÓN: DESCARGAR TODO ---
+    elif opcion == "💾 Descargar Todo":
+        st.header("💾 Exportar Stock Actual")
+        out = BytesIO()
+        with pd.ExcelWriter(out, engine='openpyxl') as w: 
+            df.to_excel(w, index=False)
+        
+        st.download_button(
+            label="📥 Descargar Excel",
+            data=out.getvalue(),
+            file_name=f"inventario_tvc_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
