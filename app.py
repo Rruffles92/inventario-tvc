@@ -48,6 +48,36 @@ if verificar_password():
     if 'carrito' not in st.session_state:
         st.session_state.carrito = []
 
+    # --- FUNCIÓN REUTILIZABLE PARA MODIFICAR ---
+    def panel_edicion(df_actual, titulo_seccion):
+        st.divider()
+        st.subheader(f"🛠️ Modificar o Eliminar desde {titulo_seccion}")
+        with st.expander("Haz clic aquí para editar un producto"):
+            busqueda = st.selectbox("Selecciona el producto:", df_actual['Clave'] + " - " + df_actual['Nombre'], key=f"edit_{titulo_seccion}")
+            clave_sel = busqueda.split(" - ")[0]
+            idx = df_actual[df_actual['Clave'] == clave_sel].index[0]
+            
+            c1, c2 = st.columns(2)
+            n_nom = c1.text_input("Nombre:", value=df_actual.at[idx, 'Nombre'], key=f"n1_{titulo_seccion}")
+            n_can = c1.number_input("Cantidad:", value=int(df_actual.at[idx, 'Cantidad']), key=f"n2_{titulo_seccion}")
+            n_ubi = c2.text_input("Ubicación:", value=str(df_actual.at[idx, 'Ubicacion']), key=f"n3_{titulo_seccion}")
+            n_pre = c2.number_input("Precio MXN:", value=float(df_actual.at[idx, 'Precio']), key=f"n4_{titulo_seccion}")
+            
+            b1, b2 = st.columns(2)
+            if b1.button("💾 Guardar Cambios", key=f"btn_g_{titulo_seccion}"):
+                df_actual.at[idx, 'Nombre'] = n_nom
+                df_actual.at[idx, 'Cantidad'] = n_can
+                df_actual.at[idx, 'Ubicacion'] = n_ubi
+                df_actual.at[idx, 'Precio'] = n_pre
+                guardar_inventario(df_actual)
+                st.success("✅ Actualizado")
+                st.rerun()
+            if b2.button("🗑️ Eliminar Producto", key=f"btn_e_{titulo_seccion}"):
+                df_actual = df_actual.drop(idx)
+                guardar_inventario(df_actual)
+                st.error("🗑️ Eliminado")
+                st.rerun()
+
     st.sidebar.title("Menú Principal")
     opcion = st.sidebar.radio("Ir a:", [
         "📊 Ver Stock", 
@@ -58,114 +88,89 @@ if verificar_password():
         "💾 Descargar Inventario"
     ])
 
-    # Botón de Cerrar Sesión actualizado
     st.sidebar.markdown("---")
     if st.sidebar.button("🚪 Cerrar Sesión"):
         st.session_state["autenticado"] = False
         st.rerun()
 
+    # --- VISTA STOCK ---
+    if opcion == "📊 Ver Stock":
+        st.header("📋 Stock Actual")
+        st.dataframe(df[['Clave', 'Nombre', 'Cantidad', 'Precio']].assign(Precio=df['Precio'].map('${:,.2f} MXN'.format)), use_container_width=True)
+        if not df.empty: panel_edicion(df, "Ver Stock")
+
+    # --- VISTA UBICACIONES ---
+    elif opcion == "📍 Ubicaciones":
+        st.header("📍 Ubicaciones")
+        st.dataframe(df[['Clave', 'Nombre', 'Ubicacion']], use_container_width=True)
+        if not df.empty: panel_edicion(df, "Ubicaciones")
+
+    # --- REGISTRAR ENTRADA ---
+    elif opcion == "📥 Registrar Entrada":
+        st.header("📥 Entrada de Mercancía")
+        with st.form("entrada"):
+            cl = st.text_input("Clave").upper()
+            no = st.text_input("Nombre")
+            cj = st.number_input("Cantidad", min_value=1)
+            ub = st.text_input("Ubicación")
+            pr = st.number_input("Precio Unitario MXN", min_value=0.0)
+            if st.form_submit_button("Guardar"):
+                if cl in df['Clave'].values:
+                    idx = df[df['Clave'] == cl].index[0]
+                    df.at[idx, 'Cantidad'] += cj
+                    df.at[idx, 'Precio'] = pr
+                else:
+                    nuevo = pd.DataFrame([[cl, no, cj, ub, pr]], columns=df.columns)
+                    df = pd.concat([df, nuevo], ignore_index=True)
+                guardar_inventario(df)
+                st.success("✅ Guardado")
+                st.rerun()
+        if not df.empty: panel_edicion(df, "Entradas")
+
     # --- PUNTO DE VENTA ---
-    if opcion == "🛒 Punto de Venta":
-        st.header("🛒 Punto de Venta (Precios en MXN)")
+    elif opcion == "🛒 Punto de Venta":
+        st.header("🛒 Punto de Venta")
         col_scan, col_cart = st.columns([1, 2])
-        
         with col_scan:
-            st.subheader("Entrada de Producto")
             codigo_input = st.text_input("Escanear o Escribir Clave:", key="scanner_input").upper()
             if codigo_input:
                 if codigo_input in df['Clave'].values:
                     prod = df[df['Clave'] == codigo_input].iloc[0]
                     if prod['Cantidad'] > 0:
                         st.session_state.carrito.append({'Clave': prod['Clave'], 'Nombre': prod['Nombre'], 'Precio': prod['Precio']})
-                        st.success(f"✅ Añadido: {prod['Nombre']}")
-                    else: st.error("❌ Sin stock disponible")
-                else: st.error("❌ No encontrado")
+                        st.success(f"✅ {prod['Nombre']}")
+                    else: st.error("❌ Sin stock")
+                else: st.error("❌ No existe")
 
         with col_cart:
-            st.subheader("Carrito Actual")
             if st.session_state.carrito:
                 df_cart = pd.DataFrame(st.session_state.carrito)
                 resumen = df_cart.groupby(['Clave', 'Nombre', 'Precio']).size().reset_index(name='Cant')
                 resumen['Subtotal'] = resumen['Cant'] * resumen['Precio']
-                
-                # Mostrar tabla con formato de moneda mexicana
-                resumen_show = resumen.copy()
-                resumen_show['Precio'] = resumen_show['Precio'].map('${:,.2f} MXN'.format)
-                resumen_show['Subtotal'] = resumen_show['Subtotal'].map('${:,.2f} MXN'.format)
-                st.table(resumen_show)
-                
-                total_venta = resumen['Subtotal'].sum()
-                st.write(f"## TOTAL A COBRAR: ${total_venta:,.2f} MXN")
+                st.table(resumen)
+                total_v = resumen['Subtotal'].sum()
+                st.write(f"## TOTAL: ${total_v:,.2f} MXN")
                 
                 if st.button("🚀 Realizar Factura"):
                     folio_gen = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    prod_list_txt = ""
+                    prod_txt = ""
                     for _, r in resumen.iterrows():
                         idx = df[df['Clave'] == r['Clave']].index[0]
                         df.at[idx, 'Cantidad'] -= r['Cant']
-                        prod_list_txt += f"{r['Cant']}x {r['Nombre']} (${r['Precio']:,.2f}) | "
-                    
+                        prod_txt += f"{r['Cant']}x {r['Nombre']} | "
                     guardar_inventario(df)
-                    guardar_en_historial(folio_gen, prod_list_txt, total_venta)
-                    
-                    ticket = f"--- TVC SAN NICOLÁS ---\n"
-                    ticket += f"FOLIO AUTO: {folio_gen}\n"
-                    ticket += f"FECHA: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-                    ticket += "------------------------\n"
-                    ticket += f"PRODUCTOS:\n{prod_list_txt.replace('|', '\n')}"
-                    ticket += "------------------------\n"
-                    ticket += f"TOTAL: ${total_venta:,.2f} MXN\n"
-                    ticket += "------------------------\n"
-                    ticket += "¡Venta Realizada con Éxito!"
-                    
-                    st.text_area("📋 TICKET LISTO PARA IMPRIMIR:", ticket, height=300)
-                    st.success(f"✅ Venta guardada con folio {folio_gen}")
+                    guardar_en_historial(folio_gen, prod_txt, total_v)
+                    st.text_area("📋 TICKET:", f"FOLIO: {folio_gen}\nFECHA: {datetime.now()}\nTOTAL: ${total_v}\n{prod_txt}")
                     st.session_state.carrito = []
-            else: st.info("Carrito vacío")
+                    st.success("✅ Venta Realizada")
+            else: st.info("Escanea productos para empezar")
 
-    # --- HISTORIAL ---
+    # --- HISTORIAL Y DESCARGA ---
     elif opcion == "📜 Historial de Ventas":
-        st.header("📜 Historial de Ventas (MXN)")
-        hist = cargar_historial()
-        if not hist.empty:
-            hist_show = hist.copy()
-            hist_show['Total'] = hist_show['Total'].map('${:,.2f} MXN'.format)
-            st.dataframe(hist_show.sort_values(by='Fecha', ascending=False), use_container_width=True)
-        else: st.warning("No hay ventas.")
-
-    # --- STOCK ---
-    elif opcion == "📊 Ver Stock":
-        st.header("📋 Stock Actual")
-        df_stock = df.copy()
-        df_stock['Precio'] = df_stock['Precio'].map('${:,.2f} MXN'.format)
-        st.dataframe(df_stock[['Clave', 'Nombre', 'Cantidad', 'Precio']], use_container_width=True)
-
-    # --- ENTRADA ---
-    elif opcion == "📥 Registrar Entrada":
-        st.header("📥 Entrada de Mercancía (MXN)")
-        with st.form("entrada"):
-            c1, c2 = st.columns(2)
-            cl = c1.text_input("Clave").upper(); no = c1.text_input("Nombre")
-            cj = c2.number_input("Cantidad", min_value=1); ub = c2.text_input("Ubicación")
-            pr = c2.number_input("Precio Unitario (MXN)", min_value=0.0)
-            if st.form_submit_button("Guardar"):
-                if cl in df['Clave'].values:
-                    idx = df[df['Clave'] == cl].index[0]
-                    df.at[idx, 'Cantidad'] += cj; df.at[idx, 'Precio'] = pr
-                    if ub: df.at[idx, 'Ubicacion'] = ub
-                else:
-                    nuevo = pd.DataFrame([[cl, no, cj, ub, pr]], columns=df.columns)
-                    df = pd.concat([df, nuevo], ignore_index=True)
-                guardar_inventario(df)
-                st.success("✅ Inventario actualizado en Pesos Mexicanos")
-    
-    # --- UBICACIONES Y DESCARGA ---
-    elif opcion == "📍 Ubicaciones":
-        st.header("📍 Ubicaciones")
-        st.dataframe(df[['Clave', 'Nombre', 'Ubicacion']], use_container_width=True)
+        st.header("📜 Historial de Ventas")
+        st.dataframe(cargar_historial().sort_values(by='Fecha', ascending=False), use_container_width=True)
 
     elif opcion == "💾 Descargar Inventario":
-        st.header("💾 Exportar Inventario")
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False)
