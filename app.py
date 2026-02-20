@@ -33,7 +33,7 @@ if "inventario_data" not in st.session_state:
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_historial()
 
-# --- SEGURIDAD Y LOGIN (Corregido para evitar errores rojos) ---
+# --- SEGURIDAD ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
@@ -55,7 +55,7 @@ if not st.session_state["autenticado"]:
 usuario = st.session_state["usuario_actual"]
 df_actual = st.session_state.inventario_data
 
-# ALERTA AUTOMÁTICA AL ENTRAR (3 cajas o menos)
+# ALERTA AUTOMÁTICA (3 cajas o menos)
 bajos_auto = df_actual[df_actual['cajas'].astype(int) <= 3]
 if not bajos_auto.empty:
     st.error(f"🚨 *¡ATENCIÓN {usuario.upper()}!* Quedan 3 cajas o menos de: {', '.join(bajos_auto['nombre'].tolist())}")
@@ -67,57 +67,47 @@ with st.sidebar:
     
     st.markdown("<br><br>", unsafe_allow_html=True)
     
-    # CHAT IA (Con búsqueda de totales específicos)
+    # CHAT IA (Recuadro Negro)
     st.markdown(f"""
         <div style="border: 3px solid black; padding: 10px; border-radius: 5px; background-color: #ffffff;">
             <p style="margin: 0; font-weight: bold; color: black; font-size: 14px;">🤖 Asistente IA ({usuario})</p>
         </div>
     """, unsafe_allow_html=True)
     
-    pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia", placeholder="Ej: cuanto hay de DHT")
-    
+    pregunta = st.text_input("¿Qué necesitas saber?", key="chat_ia")
     if pregunta:
         p = pregunta.lower().strip()
-        
-        # 1. BUSCAR TOTAL DE UN PRODUCTO ESPECÍFICO
-        if any(x in p for x in ["cuanto hay", "total de", "cantidad"]):
-            # Extraemos el nombre del producto de la pregunta
-            busqueda = p.replace("cuanto hay de", "").replace("cuanto hay", "").replace("total de", "").replace("cantidad de", "").strip()
+        if any(x in p for x in ["cuanto hay", "total de"]):
+            busqueda = p.replace("cuanto hay de", "").replace("total de", "").strip()
             res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
-            
             if not res.empty:
                 prod = res.iloc[0]
-                st.info(f"📦 {usuario}, de *{prod['nombre']}* tenemos: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas* sueltas.")
-            else:
-                st.warning(f"🔍 No encontré ningún producto que coincida con '{busqueda}'.")
-
-        # 2. LOCALIZACIÓN
-        elif any(x in p for x in ["donde", "ubica", "esta"]):
+                st.info(f"📦 {usuario}, de *{prod['nombre']}* hay: *{prod['cajas']} cajas* y *{prod['piezas_sueltas']} piezas*.")
+            else: st.warning("🔍 No lo encuentro.")
+        elif any(x in p for x in ["donde", "ubica"]):
             busqueda = p.replace("donde esta", "").replace("donde", "").strip()
             res = df_actual[df_actual['clave'].astype(str).str.lower().str.contains(busqueda) | df_actual['nombre'].str.lower().str.contains(busqueda)]
-            if not res.empty:
-                st.info(f"📍 {usuario}, está en la ubicación: *{res.iloc[0]['ubicacion']}*")
-            else:
-                st.warning(f"🔍 No encuentro esa ubicación.")
+            if not res.empty: st.info(f"📍 Está en: *{res.iloc[0]['ubicacion']}*")
+            else: st.warning("🔍 No encontrado.")
 
-        # 3. VER TODO LO QUE FALTA RELLENAR
-        elif any(x in p for x in ["rellenar", "acaba", "falta"]):
-            if not bajos_auto.empty:
-                st.error(f"⚠️ {usuario}, hay que reponer: *{', '.join(bajos_auto['nombre'].tolist())}*")
-            else:
-                st.success(f"✅ Todo bien en stock, {usuario}.")
+# --- SECCIONES ---
+if opcion == "📊 Stock Actual":
+    st.header("📋 Inventario")
+    editado = st.data_editor(df_actual, use_container_width=True)
+    if st.button("💾 Guardar Cambios"):
+        guardar_datos(editado)
+        st.session_state.inventario_data = editado
 
-# --- SECCIONES (REGISTRAR, RETIRAR, STOCK, REPORTES) ---
-if opcion == "📥 Registrar Entrada":
+elif opcion == "📥 Registrar Entrada":
     st.header("📥 Registrar Producto")
     with st.form("f_reg", clear_on_submit=True):
         col1, col2 = st.columns(2)
-        sku = col1.text_input("Clave (Scan)")
+        sku = col1.text_input("Clave")
         nom = col2.text_input("Nombre")
         c1, c2, c3 = st.columns(3)
         caj = c1.number_input("Cajas", min_value=0)
-        pxc = c2.number_input("Piezas por caja", min_value=1)
-        slt = c3.number_input("Piezas sueltas", min_value=0)
+        pxc = c2.number_input("Piezas x Caja", min_value=1)
+        slt = c3.number_input("Piezas Sueltas", min_value=0)
         ubi = st.text_input("Ubicación")
         if st.form_submit_button("✅ Guardar"):
             mask = df_actual['clave'].astype(str) == sku
@@ -149,25 +139,33 @@ elif opcion == "📤 Retirar Producto":
                     st.session_state.inventario_data = df_actual
                     st.rerun()
 
-elif opcion == "📊 Stock Actual":
-    st.header("📋 Inventario")
-    editado = st.data_editor(df_actual, use_container_width=True)
-    if st.button("💾 Guardar Cambios"):
-        guardar_datos(editado)
-        st.session_state.inventario_data = editado
-        st.success("Guardado.")
-
 elif opcion == "💾 Reportes Excel":
     st.header("💾 Gestión de Reportes")
     nombre_rep = f"Reporte_{datetime.now().strftime('%d-%m-%Y_%Hh%M')}.xlsx"
+    
     if st.button("➕ Generar Reporte"):
-        st.session_state.historial.append(nombre_rep)
-        guardar_historial(st.session_state.historial)
-        st.rerun()
-    for i, n in enumerate(st.session_state.historial):
-        c1, c2 = st.columns([4, 1])
-        c1.write(f"📄 {n}")
-        if c2.button("🗑️", key=f"b_{i}"):
-            st.session_state.historial.pop(i)
+        if nombre_rep not in st.session_state.historial:
+            st.session_state.historial.append(nombre_rep)
             guardar_historial(st.session_state.historial)
             st.rerun()
+
+    st.divider()
+    
+    # Mostrar lista con opción de DESCARGA y BORRADO
+    if st.session_state.historial:
+        # Preparamos el archivo Excel en memoria para la descarga
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_actual.to_excel(writer, index=False)
+        excel_data = output.getvalue()
+
+        for i, n in enumerate(st.session_state.historial):
+            col_nom, col_desc, col_borr = st.columns([3, 1, 1])
+            col_nom.write(f"📄 {n}")
+            # Botón de Descarga agregado
+            col_desc.download_button(label="📥 Descargar", data=excel_data, file_name=n, key=f"d_{i}")
+            # Botón de Borrado (el de la basura)
+            if col_borr.button("🗑️ Borrar", key=f"b_{i}"):
+                st.session_state.historial.pop(i)
+                guardar_historial(st.session_state.historial)
+                st.rerun()
